@@ -1,9 +1,8 @@
 import React, { useRef, forwardRef, useImperativeHandle } from 'react';
 
-const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardClick, onDeleteClick }, ref) {
+const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardClick, onDeleteClick, onDownloadClick, targetAge }, ref) {
   const stripRef = useRef(null);
 
-  // Expose the strip DOM element for scroll tracking
   useImperativeHandle(ref, () => stripRef.current);
 
   if (snapshots.length === 0) {
@@ -21,14 +20,19 @@ const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardCli
         const isPending = snap.status === 'pending';
         const isProcessing = snap.status === 'processing';
         const isError = snap.status === 'error';
+        const isHighlighted = snap.age === targetAge;
 
         return (
           <div
             key={snap.id}
-            className={`timeline-card ${isPending ? 'timeline-card--pending' : ''} ${isProcessing ? 'timeline-card--pending timeline-card--processing' : ''} ${isError ? 'timeline-card--error-state' : ''}`}
+            className={`timeline-card ${isPending ? 'timeline-card--pending' : ''} ${
+              isProcessing ? 'timeline-card--pending timeline-card--processing' : ''
+            } ${isError ? 'timeline-card--error-state' : ''} ${
+              isHighlighted && isSuccess ? 'timeline-card--highlighted' : ''
+            }`}
             onClick={() => onCardClick(snap)}
           >
-            {/* Card Delete Button */}
+            {/* Card Delete Button (Top Right) */}
             <button
               className="timeline-card__delete-btn"
               onClick={(e) => onDeleteClick(snap.id, e)}
@@ -36,6 +40,20 @@ const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardCli
             >
               ✕
             </button>
+
+            {/* Card Download Button (Top Left) */}
+            {isSuccess && snap.url && (
+              <button
+                className="timeline-card__download-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownloadClick(snap.url, snap.age);
+                }}
+                title="Download Card"
+              >
+                ⬇
+              </button>
+            )}
 
             {isSuccess && snap.url && (
               <>

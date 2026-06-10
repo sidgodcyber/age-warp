@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 
-const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWakingUp }, ref) {
+const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWakingUp, countdown }, ref) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayCanvasRef = useRef(null);
@@ -23,7 +23,6 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
     let stream = null;
     let cancelled = false;
 
-    // Reset error on each mount (fixes StrictMode double-mount stale error)
     setCameraError(false);
     setCameraReady(false);
 
@@ -38,7 +37,6 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
           audio: false,
         });
 
-        // If cleanup ran while we were awaiting, stop the new stream and bail
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -61,16 +59,14 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
           overlayCanvasRef.current.height = video.videoHeight;
         }
 
-        // Start rendering loop
         renderLoop();
       } catch (err) {
-        if (cancelled) return; // Don't set error if we were cleaned up
-        // Only show error for actual permission denial, not AbortError from StrictMode cleanup
+        if (cancelled) return;
         if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
           console.error('Camera access denied:', err);
           setCameraError(true);
         } else {
-          console.warn('Camera init interrupted (likely StrictMode remount):', err.name);
+          console.warn('Camera init interrupted:', err.name);
         }
       }
     }
@@ -98,11 +94,11 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
     function drawFaceOval(ctx, w, h) {
       const cx = w / 2;
       const cy = h / 2;
-      const rx = w * 0.19; // ~38% width diameter = 19% radius
-      const ry = h * 0.26; // ~52% height diameter = 26% radius
+      const rx = w * 0.19;
+      const ry = h * 0.26;
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.lineWidth = 2;
       ctx.setLineDash([8, 4]);
       ctx.beginPath();
@@ -131,6 +127,26 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
       <canvas ref={overlayCanvasRef} className="overlay-canvas" />
       <div className="scanline-overlay" />
 
+      {/* Gesture Zone Divider and Indicator Box */}
+      {cameraReady && (
+        <>
+          <div className="gesture-zone-line" />
+          <div className="gesture-zone-box">
+            <span className="gesture-zone-box__icon">👋</span>
+            <span className="gesture-zone-box__text">Show hand here</span>
+          </div>
+        </>
+      )}
+
+      {/* 3-Second Countdown Overlay */}
+      {countdown !== null && (
+        <div className="countdown-overlay">
+          <div className="countdown-number">
+            {countdown === 0 ? '📸' : countdown}
+          </div>
+        </div>
+      )}
+
       {cameraError && (
         <div className="camera-error">
           <div className="camera-error__icon">🚫</div>
@@ -141,19 +157,19 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
         </div>
       )}
 
-      {apiStatus === 'loading' && (
-        <div className="loading-overlay">
-          <div className="loading-overlay__icon">⏳</div>
-          <div className="loading-overlay__text">
+      {apiStatus === 'loading' && countdown === null && (
+        <div className="loading-overlay-custom">
+          <div className="loading-overlay-custom__icon">⏳</div>
+          <div className="loading-overlay-custom__text">
             {isWakingUp ? 'Waking up AI...' : 'Aging...'}
           </div>
-          <div className="loading-overlay__subtext">
+          <div className="loading-overlay-custom__subtext">
             {isWakingUp
               ? 'Please wait, booting the free Hugging Face Space (first call takes 30-60s).'
               : `Generating age ${currentAge} • ~15 seconds`}
           </div>
-          <div className="loading-overlay__progress">
-            <div className="loading-overlay__progress-bar" />
+          <div className="loading-overlay-custom__progress">
+            <div className="loading-overlay-custom__progress-bar" />
           </div>
         </div>
       )}

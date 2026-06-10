@@ -1,38 +1,43 @@
 import { useEffect, useRef, useCallback } from 'react';
 
-const FIST_HOLD_MS = 1000; // 1 second hold for generation
-const AGE_ADJUST_COOLDOWN_MS = 800; // Cooldown between increments
-
 export default function GestureEngine({
   videoRef,
   canvasRef,
   overlayCanvasRef,
   onAgeChange,
-  onSnapshot,
+  onFistGesture,
   cancelGeneration,
   currentAge,
+  countdown,
 }) {
   const handsRef = useRef(null);
-  const fistTimerRef = useRef(null);
-  const fistStartTimeRef = useRef(null);
-  const isFistRef = useRef(false);
   const animFrameRef = useRef(null);
   const lastLandmarksRef = useRef(null);
-  const lastAgeAdjustTimeRef = useRef(0);
+
+  // Gesture hold tracking refs
+  const activeGestureRef = useRef(null);
+  const holdStartTimeRef = useRef(null);
+  const actionTriggeredRef = useRef(false);
 
   // Euclidean distance helper
   const getDistance = (p1, p2) => {
     return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
   };
 
-  // Generic check to see if a finger is extended relative to the wrist (landmark 0)
+  // Check if a finger is extended relative to the wrist (landmark 0)
   const isFingerExtended = useCallback((landmarks, tipIdx, mcpIdx) => {
     const tipDist = getDistance(landmarks[tipIdx], landmarks[0]);
     const mcpDist = getDistance(landmarks[mcpIdx], landmarks[0]);
     return tipDist > mcpDist * 1.15;
   }, []);
 
-  const drawOverlay = useCallback((landmarks, isFist, holdProgress) => {
+  const resetHoldTracker = useCallback(() => {
+    activeGestureRef.current = null;
+    holdStartTimeRef.current = null;
+    actionTriggeredRef.current = false;
+  }, []);
+
+  const drawOverlay = useCallback((landmarks, activeGesture, holdProgress) => {
     const overlay = overlayCanvasRef?.current;
     if (!overlay) return;
     const ctx = overlay.getContext('2d');
@@ -42,69 +47,89 @@ export default function GestureEngine({
     const h = overlay.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Landmark 9 position (mirrored)
-    const lm9 = landmarks[9];
-    const x = (1 - lm9.x) * w;
-    const y = lm9.y * h;
-
-    // Draw tracking dot at landmark 9 (middle finger MCP)
+    // 1. Draw gesture zone boundary line (subtle vertical line at 30% width from left of visual frame)
     ctx.save();
-    ctx.fillStyle = '#00ff88';
-    ctx.shadowColor = 'rgba(0, 255, 136, 0.6)';
-    ctx.shadowBlur = 12;
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.15)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
     ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(w * 0.3, 0);
+    ctx.lineTo(w * 0.3, h);
+    ctx.stroke();
     ctx.restore();
 
-    // If fist detected, draw glow on face oval
-    if (isFist) {
-      const cx = w / 2;
-      const cy = h / 2;
-      const rx = w * 0.19;
-      const ry = h * 0.26;
+    // 2. Draw tracking dot at landmark 9 (middle finger MCP)
+    if (landmarks) {
+      const lm9 = landmarks[9];
+      const x = (1 - lm9.x) * w;
+      const y = lm9.y * h;
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(0, 255, 136, 0.5)';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = 'rgba(0, 255, 136, 0.3)';
-      ctx.shadowBlur = 20;
-      ctx.setLineDash([]);
+      ctx.fillStyle = '#00ff88';
+      ctx.shadowColor = 'rgba(0, 255, 136, 0.6)';
+      ctx.shadowBlur = 12;
       ctx.beginPath();
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
-    // Fist hold progress arc
-    if (isFist && holdProgress > 0) {
-      const arcRadius = 24;
-      const endAngle = (holdProgress / 100) * Math.PI * 2 - Math.PI / 2;
+    // 3. Circular progress ring centered on webcam view
+    if (activeGesture && holdProgress > 0) {
+      const cx = w / 2;
+      const cy = h / 2;
+      const r = Math.min(w, h) * 0.22;
 
-      // Background circle
       ctx.save();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 4;
+      
+      // Semi-transparent dark background for better contrast
+      ctx.fillStyle = 'rgba(10, 10, 10, 0.55)';
+      ctx.fillRect(0, 0, w, h);
+
+      // Background circle path
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 8;
       ctx.beginPath();
-      ctx.arc(x, y - 40, arcRadius, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Progress arc
+      // Progress filled path
+      const startAngle = -Math.PI / 2;
+      const endAngle = startAngle + (holdProgress / 100) * Math.PI * 2;
       ctx.strokeStyle = '#00ff88';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 8;
       ctx.lineCap = 'round';
-      ctx.shadowColor = 'rgba(0, 255, 136, 0.5)';
-      ctx.shadowBlur = 10;
+      ctx.shadowColor = 'rgba(0, 255, 136, 0.6)';
+      ctx.shadowBlur = 15;
       ctx.beginPath();
-      ctx.arc(x, y - 40, arcRadius, -Math.PI / 2, endAngle);
+      ctx.arc(cx, cy, r, startAngle, endAngle);
       ctx.stroke();
 
-      // Percentage text
-      ctx.fillStyle = '#00ff88';
-      ctx.font = 'bold 11px "JetBrains Mono", monospace';
+      // Emoji and text indicators in the center of the ring
+      let emoji = '';
+      let label = '';
+      if (activeGesture === 'fist') { emoji = '✊'; label = 'Pose'; }
+      else if (activeGesture === 'up') { emoji = '👆'; label = 'Age Up'; }
+      else if (activeGesture === 'down') { emoji = '👇'; label = 'Age Down'; }
+      else if (activeGesture === 'cancel') { emoji = '✌️'; label = 'Cancel'; }
+
+      // Emoji
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '32px system-ui, -apple-system';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`${Math.round(holdProgress)}%`, x, y - 40);
+      ctx.fillText(emoji, cx, cy - 22);
+
+      // Label description
+      ctx.fillStyle = '#a0a0a0';
+      ctx.font = 'bold 11px "JetBrains Mono", monospace';
+      ctx.fillText(label.toUpperCase(), cx, cy + 16);
+
+      // Percentage
+      ctx.fillStyle = '#00ff88';
+      ctx.font = 'bold 20px "JetBrains Mono", monospace';
+      ctx.fillText(`${Math.round(holdProgress)}%`, cx, cy + 38);
+
       ctx.restore();
     }
   }, [overlayCanvasRef]);
@@ -120,95 +145,93 @@ export default function GestureEngine({
     hands.setOptions({
       maxNumHands: 1,
       modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.5,
+      minDetectionConfidence: 0.85,
+      minTrackingConfidence: 0.85,
     });
 
     hands.onResults((results) => {
+      // If we are currently counting down, suspend gesture processing
+      if (countdown !== null) {
+        resetHoldTracker();
+        drawOverlay(null, null, 0);
+        return;
+      }
+
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0];
         lastLandmarksRef.current = landmarks;
 
-        // Determine extended fingers
-        const indexExtended = isFingerExtended(landmarks, 8, 5);
-        const middleExtended = isFingerExtended(landmarks, 12, 9);
-        const ringExtended = isFingerExtended(landmarks, 16, 13);
-        const pinkyExtended = isFingerExtended(landmarks, 20, 17);
+        const score = results.multiHandedness?.[0]?.score || 0;
+        // Gesture zone constraint: detect in the left 30% of the visual frame (screen x <= 0.3, meaning landmarks[0].x >= 0.7)
+        const isLeftZone = (1 - landmarks[0].x) <= 0.3;
 
-        // 1. Fist (✊): all 4 folded
-        const isFist = !indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+        if (score > 0.85 && isLeftZone) {
+          // Determine extended fingers
+          const indexExtended = isFingerExtended(landmarks, 8, 5);
+          const middleExtended = isFingerExtended(landmarks, 12, 9);
+          const ringExtended = isFingerExtended(landmarks, 16, 13);
+          const pinkyExtended = isFingerExtended(landmarks, 20, 17);
 
-        // 2. Index Only (👆/👇): index extended, others folded
-        const isIndexOnly = indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+          let detectedGesture = null;
 
-        // 3. Peace (✌️): index and middle extended, others folded
-        const isPeace = indexExtended && middleExtended && !ringExtended && !pinkyExtended;
-
-        // --- Action: Peace gesture to cancel ---
-        if (isPeace) {
-          cancelGeneration();
-        }
-
-        // --- Action: Index point up/down to adjust age ---
-        const now = Date.now();
-        if (isIndexOnly && now - lastAgeAdjustTimeRef.current > AGE_ADJUST_COOLDOWN_MS) {
-          // Vector from MCP to tip
-          const dy = landmarks[8].y - landmarks[5].y;
-          if (dy < -0.05) {
-            // Index pointing UP: targetAge + 5
-            onAgeChange(Math.min(80, currentAge + 5));
-            lastAgeAdjustTimeRef.current = now;
-          } else if (dy > 0.05) {
-            // Index pointing DOWN: targetAge - 5
-            onAgeChange(Math.max(0, currentAge - 5));
-            lastAgeAdjustTimeRef.current = now;
+          // 1. Fist (✊)
+          if (!indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+            detectedGesture = 'fist';
           }
-        }
-
-        // --- Action: Fist Hold for Snapshot timeline ---
-        const wasFist = isFistRef.current;
-
-        if (isFist && !wasFist) {
-          isFistRef.current = true;
-          fistStartTimeRef.current = Date.now();
-          fistTimerRef.current = setTimeout(() => {
-            const canvas = canvasRef?.current;
-            if (canvas) {
-              onSnapshot(canvas);
+          // 2. Index Pointing (👆/👇)
+          else if (indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+            const dy = landmarks[8].y - landmarks[5].y;
+            if (dy < -0.05) {
+              detectedGesture = 'up';
+            } else if (dy > 0.05) {
+              detectedGesture = 'down';
             }
-            fistStartTimeRef.current = null;
-          }, FIST_HOLD_MS);
-        } else if (!isFist && wasFist) {
-          isFistRef.current = false;
-          if (fistTimerRef.current) {
-            clearTimeout(fistTimerRef.current);
-            fistTimerRef.current = null;
           }
-          fistStartTimeRef.current = null;
-        }
+          // 3. Peace/Cancel (✌️)
+          else if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
+            detectedGesture = 'cancel';
+          }
 
-        // --- Draw Overlay animations ---
-        let holdProgress = 0;
-        if (isFistRef.current && fistStartTimeRef.current) {
-          const elapsed = Date.now() - fistStartTimeRef.current;
-          holdProgress = Math.min(100, (elapsed / FIST_HOLD_MS) * 100);
+          if (detectedGesture) {
+            if (activeGestureRef.current !== detectedGesture) {
+              activeGestureRef.current = detectedGesture;
+              holdStartTimeRef.current = Date.now();
+              actionTriggeredRef.current = false;
+            } else if (!actionTriggeredRef.current) {
+              const elapsed = Date.now() - holdStartTimeRef.current;
+              const progress = Math.min(100, (elapsed / 1500) * 100);
+
+              if (elapsed >= 1500) {
+                actionTriggeredRef.current = true;
+                // Trigger action
+                if (detectedGesture === 'fist') {
+                  onFistGesture();
+                } else if (detectedGesture === 'up') {
+                  onAgeChange(Math.min(80, currentAge + 1));
+                } else if (detectedGesture === 'down') {
+                  onAgeChange(Math.max(0, currentAge - 1));
+                } else if (detectedGesture === 'cancel') {
+                  cancelGeneration();
+                }
+              }
+              drawOverlay(landmarks, detectedGesture, progress);
+            } else {
+              drawOverlay(landmarks, detectedGesture, 100);
+            }
+          } else {
+            resetHoldTracker();
+            drawOverlay(landmarks, null, 0);
+          }
+        } else {
+          // Hand detected but confidence too low or outside gesture zone
+          resetHoldTracker();
+          drawOverlay(landmarks, null, 0);
         }
-        drawOverlay(landmarks, isFistRef.current, holdProgress);
       } else {
         // No hand detected
         lastLandmarksRef.current = null;
-        isFistRef.current = false;
-        if (fistTimerRef.current) {
-          clearTimeout(fistTimerRef.current);
-          fistTimerRef.current = null;
-        }
-        fistStartTimeRef.current = null;
-
-        const overlay = overlayCanvasRef?.current;
-        if (overlay) {
-          const ctx = overlay.getContext('2d');
-          if (ctx) ctx.clearRect(0, 0, overlay.width, overlay.height);
-        }
+        resetHoldTracker();
+        drawOverlay(null, null, 0);
       }
     });
 
@@ -224,7 +247,7 @@ export default function GestureEngine({
       try {
         await hands.send({ image: video });
       } catch (err) {
-        // Ignore MediaPipe transient frame errors
+        // Ignore MediaPipe frame send errors
       }
 
       if (running) {
@@ -243,7 +266,7 @@ export default function GestureEngine({
       running = false;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       clearInterval(checkReady);
-      if (fistTimerRef.current) clearTimeout(fistTimerRef.current);
+      resetHoldTracker();
       hands.close();
     };
   }, [
@@ -251,23 +274,30 @@ export default function GestureEngine({
     canvasRef,
     overlayCanvasRef,
     onAgeChange,
-    onSnapshot,
+    onFistGesture,
     cancelGeneration,
     currentAge,
+    countdown,
     isFingerExtended,
     drawOverlay,
+    resetHoldTracker,
   ]);
 
-  // Continuous overlay progress updater
+  // Continuous animation frame helper to keep overlay progress ring smooth
   useEffect(() => {
     let running = true;
     function updateProgress() {
       if (!running) return;
 
-      if (isFistRef.current && fistStartTimeRef.current && lastLandmarksRef.current) {
-        const elapsed = Date.now() - fistStartTimeRef.current;
-        const holdProgress = Math.min(100, (elapsed / FIST_HOLD_MS) * 100);
-        drawOverlay(lastLandmarksRef.current, true, holdProgress);
+      if (
+        activeGestureRef.current &&
+        holdStartTimeRef.current &&
+        !actionTriggeredRef.current &&
+        lastLandmarksRef.current
+      ) {
+        const elapsed = Date.now() - holdStartTimeRef.current;
+        const progress = Math.min(100, (elapsed / 1500) * 100);
+        drawOverlay(lastLandmarksRef.current, activeGestureRef.current, progress);
       }
 
       requestAnimationFrame(updateProgress);

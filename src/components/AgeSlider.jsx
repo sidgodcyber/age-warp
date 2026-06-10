@@ -16,6 +16,7 @@ export default function AgeSlider({ currentAge, min = 0, max = 80, onChange }) {
         type="range"
         min={min}
         max={max}
+        step={1}
         value={currentAge}
         onChange={(e) => onChange(Number(e.target.value))}
         className="age-slider-range"

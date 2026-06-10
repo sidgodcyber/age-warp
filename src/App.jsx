@@ -9,17 +9,28 @@ export default function App() {
   const [modalAge, setModalAge] = useState(21);
   const [targetAge, setTargetAge] = useState(21);
   
+  // Camera permission flow
+  const [cameraPermissionStatus, setCameraPermissionStatus] = useState('prompt'); // 'prompt' | 'granted' | 'denied'
+  
+  // App dimensions resizing
+  const [leftPanelWidth, setLeftPanelWidth] = useState('40%'); // '30%' | '40%' | '60%'
+
+  // API states
   const [apiStatus, setApiStatus] = useState('idle'); // 'idle' | 'loading' | 'error'
   const [isWakingUp, setIsWakingUp] = useState(false);
   const [snapshots, setSnapshots] = useState([]); // Array of snapshots
   const [overlayImage, setOverlayImage] = useState(null);
+  const [lastSnapshot, setLastSnapshot] = useState(null); // Keep last captured frame
   
   // Right side panel displays
   const [latestAgedImageUrl, setLatestAgedImageUrl] = useState(null);
   const [timelineVideoUrl, setTimelineVideoUrl] = useState(null);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
 
-  // Queue states
+  // Countdown overlay state
+  const [countdown, setCountdown] = useState(null); // null | 3 | 2 | 1 | 0
+
+  // Queue states for full timeline
   const [generationProgress, setGenerationProgress] = useState(null); // null or { current: number, total: number }
   const activeControllersRef = useRef([]);
 
@@ -36,6 +47,42 @@ export default function App() {
   useEffect(() => {
     targetAgeRef.current = targetAge;
   }, [targetAge]);
+
+  // Check camera permissions on load
+  useEffect(() => {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: 'camera' })
+        .then((result) => {
+          if (result.state === 'granted') {
+            setCameraPermissionStatus('granted');
+          } else if (result.state === 'denied') {
+            setCameraPermissionStatus('denied');
+          }
+          result.onchange = () => {
+            if (result.state === 'granted') {
+              setCameraPermissionStatus('granted');
+            } else if (result.state === 'denied') {
+              setCameraPermissionStatus('denied');
+            }
+          };
+        })
+        .catch((err) => {
+          console.warn('Permissions API query not fully supported:', err);
+        });
+    }
+  }, []);
+
+  const requestCameraPermission = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setCameraPermissionStatus('granted');
+    } catch (err) {
+      console.error('Camera access denied:', err);
+      setCameraPermissionStatus('denied');
+    }
+  };
 
   const onAgeChange = useCallback((age) => {
     setTargetAge(age);
@@ -68,29 +115,137 @@ export default function App() {
     );
   }, []);
 
-  // Sequential generation of ages 0, 10, 20, 30, 40, 50, 60, 70, 80
-  const onSnapshot = useCallback(async (canvas) => {
+  // Generate target age only
+  const generateTargetAgeImage = async (canvas) => {
     if (userAgeRef.current === null) return;
     
-    // Cancel any active generation queue first
     cancelGeneration();
+    setApiStatus('loading');
+    setTimelineVideoUrl(null); // Clear video view
+
+    // Capture the snapshot image data
+    const imageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
+    setLastSnapshot(imageBase64);
 
     const currentSourceAge = userAgeRef.current;
-    const agesToGenerate = [0, 10, 20, 30, 40, 50, 60, 70, 80];
-    
-    console.log('📸 Capturing snapshot. Triggering sequential timeline aging queue...');
-    setApiStatus('loading');
-    setTimelineVideoUrl(null); // Clear video when generating new timeline
+    const currentTargetAge = targetAgeRef.current;
+    const captureTime = new Date().toLocaleTimeString();
+    const cardId = `snap-${Date.now()}-${currentTargetAge}`;
 
-    // Capture the snapshot image data once
-    const imageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
+    // Create a new card and append it to the strip
+    const newCard = {
+      id: cardId,
+      age: currentTargetAge,
+      status: 'processing',
+      url: null,
+      time: captureTime,
+    };
+
+    setSnapshots((prev) => {
+      // Avoid duplicate ages in timeline by filtering existing target age if present
+      const filtered = prev.filter((s) => s.age !== currentTargetAge);
+      return [...filtered, newCard];
+    });
+
+    const controller = new AbortController();
+    activeControllersRef.current.push(controller);
+
+    let isWaking = false;
+    const wakingTimeout = setTimeout(() => {
+      isWaking = true;
+      setIsWakingUp(true);
+    }, 4000);
+
+    try {
+      const res = await fetch('/api/age', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'image',
+          imageBase64,
+          sourceAge: currentSourceAge,
+          targetAge: currentTargetAge,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(wakingTimeout);
+      setIsWakingUp(false);
+
+      if (!res.ok) throw new Error('API failed');
+      const data = await res.json();
+      if (!data.output) throw new Error('No image output returned');
+
+      setSnapshots((prev) =>
+        prev.map((s) => (s.id === cardId ? { ...s, status: 'success', url: data.output } : s))
+      );
+      setLatestAgedImageUrl(data.output);
+
+    } catch (err) {
+      clearTimeout(wakingTimeout);
+      setIsWakingUp(false);
+
+      if (err.name === 'AbortError') {
+        console.log(`Generation aborted for age ${currentTargetAge}`);
+      } else {
+        console.error('Error generating image:', err);
+        setSnapshots((prev) =>
+          prev.map((s) => (s.id === cardId ? { ...s, status: 'error', errorMsg: 'Failed' } : s))
+        );
+        setApiStatus('error');
+        setTimeout(() => setApiStatus('idle'), 3000);
+      }
+    } finally {
+      activeControllersRef.current = activeControllersRef.current.filter((c) => c !== controller);
+      setApiStatus('idle');
+    }
+  };
+
+  // Trigger 3s countdown before snapshot
+  const triggerFistAction = useCallback(() => {
+    if (countdown !== null || apiStatus === 'loading') return;
+
+    setCountdown(3);
+
+    const runCountdown = (current) => {
+      if (current > 1) {
+        setTimeout(() => {
+          setCountdown(current - 1);
+          runCountdown(current - 1);
+        }, 1000);
+      } else {
+        setTimeout(() => {
+          setCountdown(0); // Show camera emoji 📸
+          setTimeout(() => {
+            setCountdown(null);
+            const canvas = webcamRef.current?.canvasRef?.current;
+            if (canvas) {
+              generateTargetAgeImage(canvas);
+            }
+          }, 600);
+        }, 1000);
+      }
+    };
+
+    runCountdown(3);
+  }, [countdown, apiStatus]);
+
+  // Generate full timeline steps of 5 (17 images) using lastSnapshot
+  const generateFullTimeline = async () => {
+    if (!lastSnapshot || userAge === null) return;
+
+    cancelGeneration();
+    setApiStatus('loading');
+    setTimelineVideoUrl(null);
+
+    const agesToGenerate = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80];
     const captureTime = new Date().toLocaleTimeString();
 
-    // 1. Pre-populate timeline with loading/pending cards
+    // Replace the timeline strip with the 17 pending cards
     const initialBatch = agesToGenerate.map((age) => ({
       id: `snap-${Date.now()}-${age}`,
       age: age,
-      status: 'pending', // 'pending' | 'processing' | 'success' | 'error'
+      status: 'pending',
       url: null,
       time: captureTime,
     }));
@@ -98,14 +253,12 @@ export default function App() {
     setSnapshots(initialBatch);
     setGenerationProgress({ current: 0, total: agesToGenerate.length });
 
-    // 2. Sequentially fetch each age
     let completedCount = 0;
-    
+
     for (let i = 0; i < agesToGenerate.length; i++) {
       const targetAgeValue = agesToGenerate[i];
       const cardId = initialBatch[i].id;
 
-      // Update card status to processing
       setSnapshots((prev) =>
         prev.map((s) => (s.id === cardId ? { ...s, status: 'processing' } : s))
       );
@@ -113,7 +266,6 @@ export default function App() {
       const controller = new AbortController();
       activeControllersRef.current.push(controller);
 
-      // Timeout helper for waking up notification
       let isWaking = false;
       const wakingTimeout = setTimeout(() => {
         isWaking = true;
@@ -126,8 +278,8 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'image',
-            imageBase64,
-            sourceAge: currentSourceAge,
+            imageBase64: lastSnapshot,
+            sourceAge: userAge,
             targetAge: targetAgeValue,
           }),
           signal: controller.signal,
@@ -136,22 +288,18 @@ export default function App() {
         clearTimeout(wakingTimeout);
         setIsWakingUp(false);
 
-        if (!res.ok) {
-          throw new Error('API failed');
-        }
-
+        if (!res.ok) throw new Error('API failed');
         const data = await res.json();
         if (!data.output) throw new Error('No image output returned');
 
-        // Update the card on success
         setSnapshots((prev) =>
-          prev.map((s) =>
-            s.id === cardId ? { ...s, status: 'success', url: data.output } : s
-          )
+          prev.map((s) => (s.id === cardId ? { ...s, status: 'success', url: data.output } : s))
         );
 
-        // Update main preview panel with this latest image
-        setLatestAgedImageUrl(data.output);
+        // Update main preview panel with this card if it matches the current target age
+        if (targetAgeValue === targetAgeRef.current) {
+          setLatestAgedImageUrl(data.output);
+        }
 
         completedCount++;
         setGenerationProgress({ current: completedCount, total: agesToGenerate.length });
@@ -167,39 +315,31 @@ export default function App() {
 
         console.error(`Error generating age ${targetAgeValue}:`, err);
         setSnapshots((prev) =>
-          prev.map((s) =>
-            s.id === cardId ? { ...s, status: 'error', errorMsg: 'Failed' } : s
-          )
+          prev.map((s) => (s.id === cardId ? { ...s, status: 'error', errorMsg: 'Failed' } : s))
         );
       } finally {
-        // Remove this controller from active list
         activeControllersRef.current = activeControllersRef.current.filter((c) => c !== controller);
       }
     }
 
     setApiStatus('idle');
     setGenerationProgress(null);
-  }, [cancelGeneration]);
+  };
 
-  // Generate video logic
+  // Generate video using stored lastSnapshot
   const handleGenerateVideo = async () => {
-    if (snapshots.length === 0 || !webcamRef.current) return;
+    if (!lastSnapshot || userAge === null) return;
     
-    // Capture latest webcam frame to use as source
-    const canvas = webcamRef.current.canvasRef.current;
-    if (!canvas) return;
-
     setIsVideoLoading(true);
     setTimelineVideoUrl(null);
 
     try {
-      const imageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
       const res = await fetch('/api/age', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'video',
-          imageBase64,
+          imageBase64: lastSnapshot,
           sourceAge: userAge,
           targetAge: 80,
           duration: 5,
@@ -221,8 +361,28 @@ export default function App() {
     }
   };
 
+  // Download aged image helper
+  const downloadImage = async (url, age) => {
+    if (!url) return;
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `agewarp-age-${age}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Download failed, opening in tab:', err);
+      window.open(url, '_blank');
+    }
+  };
+
   const deleteSnapshot = useCallback((idToDelete, e) => {
-    e.stopPropagation(); // Prevent opening card detail
+    e.stopPropagation();
     setSnapshots((prev) => prev.filter((s) => s.id !== idToDelete));
   }, []);
 
@@ -232,8 +392,30 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {/* Camera Permission Screen */}
+      {cameraPermissionStatus !== 'granted' && (
+        <div className="permission-screen-overlay">
+          <div className="permission-screen">
+            <div className="permission-screen__icon">📷</div>
+            <h2 className="permission-screen__title">Camera Access Required</h2>
+            <p className="permission-screen__text">
+              AgeWarp needs camera access to detect your face and gestures.
+            </p>
+            {cameraPermissionStatus === 'denied' ? (
+              <div className="permission-screen__error">
+                Camera access is required to use AgeWarp. Please allow camera access in your browser settings and refresh the page.
+              </div>
+            ) : (
+              <button className="permission-screen__btn" onClick={requestCameraPermission}>
+                Allow Camera Access
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Age Setup Modal */}
-      {userAge === null && (
+      {cameraPermissionStatus === 'granted' && userAge === null && (
         <div className="age-modal-overlay">
           <div className="age-modal">
             <h2 className="age-modal__title">What is your current age?</h2>
@@ -258,13 +440,20 @@ export default function App() {
         </div>
       )}
 
-      {/* Redesigned Split Screen Layout */}
+      {/* Split Screen Layout */}
       <div className="split-layout">
-        {/* Left Side (40%): Webcam, controls, slider */}
-        <div className="split-left">
-          {/* Status badge */}
+        {/* Left Side: Webcam & Controls */}
+        <div className="split-left" style={{ width: leftPanelWidth }}>
           <div className="status-badge-inline">
-            <div className={`status-badge-inline__dot${apiStatus === 'error' ? ' status-badge-inline__dot--error' : apiStatus === 'loading' ? ' status-badge-inline__dot--loading' : ''}`} />
+            <div
+              className={`status-badge-inline__dot${
+                apiStatus === 'error'
+                  ? ' status-badge-inline__dot--error'
+                  : apiStatus === 'loading'
+                  ? ' status-badge-inline__dot--loading'
+                  : ''
+              }`}
+            />
             <span>
               {apiStatus === 'idle' && 'AgeWarp Ready'}
               {apiStatus === 'loading' && (isWakingUp ? 'Waking up AI...' : 'Processing...')}
@@ -273,20 +462,48 @@ export default function App() {
           </div>
 
           <div className="webcam-panel">
-            <WebcamFeed
-              ref={webcamRef}
-              apiStatus={apiStatus}
-              currentAge={targetAge}
-              isWakingUp={isWakingUp}
-            />
+            {cameraPermissionStatus === 'granted' && (
+              <WebcamFeed
+                ref={webcamRef}
+                apiStatus={apiStatus}
+                currentAge={targetAge}
+                isWakingUp={isWakingUp}
+                countdown={countdown}
+              />
+            )}
             
             {/* Gesture Hint Bar */}
             <div className="gesture-hint-bar">
-              <div className="gesture-hint">✊ <span>Generate Timeline</span></div>
-              <div className="gesture-hint">☝️ <span>Age Up</span></div>
-              <div className="gesture-hint">👇 <span>Age Down</span></div>
+              <div className="gesture-hint">✊ <span>Capture</span></div>
+              <div className="gesture-hint">☝️ <span>+1 Age</span></div>
+              <div className="gesture-hint">👇 <span>-1 Age</span></div>
               <div className="gesture-hint">✌️ <span>Cancel</span></div>
             </div>
+          </div>
+
+          {/* Resizable Webcam Width Bar */}
+          <div className="webcam-resize-bar">
+            <button
+              className={`resize-btn ${leftPanelWidth === '30%' ? 'active' : ''}`}
+              onClick={() => setLeftPanelWidth('30%')}
+              title="Shrink webcam layout"
+            >
+              ⊖ Shrink (30%)
+            </button>
+            <button
+              className={`resize-btn ${leftPanelWidth === '40%' ? 'active' : ''}`}
+              onClick={() => setLeftPanelWidth('40%')}
+              title="Default webcam layout"
+            >
+              ⊙ Default (40%)
+            </button>
+            <button
+              className={`resize-btn ${leftPanelWidth === '60%' ? 'active' : ''}`}
+              onClick={() => setLeftPanelWidth('60%')}
+              title="Expand webcam layout"
+            >
+              ⊕ Expand (60%)
+            </button>
           </div>
 
           {/* Interactive Controls Panel */}
@@ -303,24 +520,32 @@ export default function App() {
               {/* Action Buttons */}
               <div className="action-buttons-group">
                 <button
+                  className="action-btn action-btn--timeline"
+                  onClick={generateFullTimeline}
+                  disabled={!lastSnapshot || apiStatus === 'loading'}
+                >
+                  📅 Generate Full Timeline (0-80)
+                </button>
+                <button
                   className="action-btn action-btn--video"
                   onClick={handleGenerateVideo}
-                  disabled={snapshots.length === 0 || isVideoLoading || apiStatus === 'loading'}
+                  disabled={!lastSnapshot || isVideoLoading || apiStatus === 'loading'}
                 >
                   {isVideoLoading ? 'Generating Video...' : '📹 Generate Video'}
                 </button>
-                {apiStatus === 'loading' && (
-                  <button className="action-btn action-btn--cancel" onClick={cancelGeneration}>
-                    🛑 Cancel Generation
-                  </button>
-                )}
               </div>
+
+              {apiStatus === 'loading' && (
+                <button className="action-btn action-btn--cancel" onClick={cancelGeneration}>
+                  🛑 Cancel Generation
+                </button>
+              )}
             </div>
           )}
         </div>
 
-        {/* Right Side (60%): Main visualizer */}
-        <div className="split-right">
+        {/* Right Side: Main visualizer */}
+        <div className="split-right" style={{ width: `calc(100% - ${leftPanelWidth})` }}>
           {timelineVideoUrl ? (
             <div className="visualizer-video-wrapper">
               <video className="visualizer-video" src={timelineVideoUrl} controls autoPlay loop />
@@ -328,11 +553,44 @@ export default function App() {
           ) : latestAgedImageUrl ? (
             <div className="visualizer-image-wrapper">
               <img className="visualizer-image" src={latestAgedImageUrl} alt="Aged Result" />
+              <button
+                className="visualizer-download-btn"
+                onClick={() => downloadImage(latestAgedImageUrl, targetAge)}
+                title="Download Image"
+              >
+                ⬇ Download Image
+              </button>
             </div>
           ) : (
+            /* Empty Right Panel */
             <div className="visualizer-placeholder">
-              <div className="visualizer-placeholder__icon">✊</div>
-              <div className="visualizer-placeholder__text">Hold fist to generate your timeline</div>
+              <div className="visualizer-placeholder__silhouette">
+                <svg viewBox="0 0 100 120" className="face-silhouette">
+                  <path
+                    d="M50,15 C32,15 22,28 22,48 C22,64 26,72 32,84 C38,96 42,102 50,102 C58,102 62,96 68,84 C74,72 78,64 78,48 C78,28 68,15 50,15 Z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                    className="face-silhouette__oval"
+                  />
+                  <path
+                    d="M30,110 C35,95 40,90 50,90 C60,90 65,95 70,110"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                    className="face-silhouette__shoulders"
+                  />
+                  <circle cx="40" cy="48" r="2" fill="var(--accent)" className="face-silhouette__node" />
+                  <circle cx="60" cy="48" r="2" fill="var(--accent)" className="face-silhouette__node" />
+                  <path d="M47,60 Q50,62 53,60" fill="none" stroke="var(--accent)" strokeWidth="1.5" className="face-silhouette__node" />
+                </svg>
+                <div className="visualizer-placeholder__age-glow">{targetAge}</div>
+              </div>
+              <div className="visualizer-placeholder__instruction">
+                <span className="gesture-icon">✊</span> Hold for 1.5s to generate
+              </div>
             </div>
           )}
 
@@ -362,6 +620,8 @@ export default function App() {
           snapshots={snapshots}
           onCardClick={onCardClick}
           onDeleteClick={deleteSnapshot}
+          onDownloadClick={downloadImage}
+          targetAge={targetAge}
         />
       )}
 
@@ -375,6 +635,15 @@ export default function App() {
               <div className="fullscreen-overlay__label">
                 Age {overlayImage.age} • {overlayImage.time}
               </div>
+              <button
+                className="fullscreen-overlay__download-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadImage(overlayImage.url, overlayImage.age);
+                }}
+              >
+                ⬇ Download
+              </button>
             </>
           ) : (
             <div className="fullscreen-overlay__loading">
@@ -406,10 +675,10 @@ export default function App() {
           canvasRef={webcamRef.current.canvasRef}
           overlayCanvasRef={webcamRef.current.overlayCanvasRef}
           onAgeChange={onAgeChange}
-          onSnapshot={onSnapshot}
-          timelineRef={timelineRef}
+          onFistGesture={triggerFistAction}
           cancelGeneration={cancelGeneration}
           currentAge={targetAge}
+          countdown={countdown}
         />
       )}
 
