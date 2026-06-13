@@ -1,10 +1,28 @@
 const FormData = require('form-data');
+const fetch = require('node-fetch');
 
-export default async function handler(event, context) {
+exports.handler = async function(event, context) {
+  // Set CORS headers
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
+
+  // Handle preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers,
+      body: ''
+    };
+  }
+
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
@@ -15,7 +33,7 @@ export default async function handler(event, context) {
     if (!imageBase64 || sourceAge === undefined || targetAge === undefined) {
       return {
         statusCode: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ error: 'Missing imageBase64, sourceAge, or targetAge' })
       };
     }
@@ -25,7 +43,7 @@ export default async function handler(event, context) {
     // Convert base64 to buffer
     const buffer = Buffer.from(imageBase64, 'base64');
     const form = new FormData();
-    form.append('files', buffer, { filename: 'image.jpg' });
+    form.append('files', buffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
 
     // Upload image
     const uploadRes = await fetch(
@@ -117,7 +135,7 @@ export default async function handler(event, context) {
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ output: outputUrl })
     };
 
@@ -125,8 +143,8 @@ export default async function handler(event, context) {
     console.error('[age] Failed:', error.message);
     return {
       statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ error: error.message || 'Internal error' })
     };
   }
-}
+};
