@@ -2,7 +2,6 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import WebcamFeed from './components/WebcamFeed';
 import GestureEngine from './components/GestureEngine';
 import AgeSlider from './components/AgeSlider';
-import TimestampStrip from './components/TimestampStrip';
 
 export default function App() {
   const [userAge, setUserAge] = useState(null);
@@ -13,7 +12,8 @@ export default function App() {
   const [cameraPermissionStatus, setCameraPermissionStatus] = useState('prompt'); // 'prompt' | 'granted' | 'denied'
   
   // App dimensions resizing
-  const [leftPanelWidth, setLeftPanelWidth] = useState('40%'); // '30%' | '40%' | '60%'
+  const [leftPanelWidth, setLeftPanelWidth] = useState('60%'); // '30%' | '40%' | '60%'
+  const [isWebcamExpanded, setIsWebcamExpanded] = useState(false);
 
   // API states
   const [apiStatus, setApiStatus] = useState('idle'); // 'idle' | 'loading' | 'error'
@@ -73,6 +73,17 @@ export default function App() {
     }
   }, []);
 
+  // Handle ESC key to close lightbox overlay
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setOverlayImage(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const requestCameraPermission = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -98,7 +109,7 @@ export default function App() {
 
   // Cancel any active generation requests and reset progress
   const cancelGeneration = useCallback(() => {
-    console.log('🚫 Cancelling generation queue...');
+    console.log('Cancelling generation queue...');
     activeControllersRef.current.forEach((controller) => controller.abort());
     activeControllersRef.current = [];
     setGenerationProgress(null);
@@ -181,6 +192,60 @@ export default function App() {
       );
       setLatestAgedImageUrl(data.output);
 
+    } finally {
+      activeControllersRef.current = activeControllersRef.current.filter((c) => c !== controller);
+      setApiStatus('idle');
+    }
+  };
+
+  const retryGeneration = async (snap) => {
+    if (!lastSnapshot || userAge === null) return;
+
+    const cardId = snap.id;
+    const currentTargetAge = snap.age;
+
+    // Set card status to processing
+    setSnapshots((prev) =>
+      prev.map((s) => (s.id === cardId ? { ...s, status: 'processing', errorMsg: null } : s))
+    );
+
+    const controller = new AbortController();
+    activeControllersRef.current.push(controller);
+
+    let isWaking = false;
+    const wakingTimeout = setTimeout(() => {
+      isWaking = true;
+      setIsWakingUp(true);
+    }, 4000);
+
+    try {
+      const res = await fetch('/api/age', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'image',
+          imageBase64: lastSnapshot,
+          sourceAge: userAge,
+          targetAge: currentTargetAge,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(wakingTimeout);
+      setIsWakingUp(false);
+
+      if (!res.ok) throw new Error('API failed');
+      const data = await res.json();
+      if (!data.output) throw new Error('No image output returned');
+
+      setSnapshots((prev) =>
+        prev.map((s) => (s.id === cardId ? { ...s, status: 'success', url: data.output } : s))
+      );
+      
+      if (currentTargetAge === targetAgeRef.current) {
+        setLatestAgedImageUrl(data.output);
+      }
+
     } catch (err) {
       clearTimeout(wakingTimeout);
       setIsWakingUp(false);
@@ -188,16 +253,13 @@ export default function App() {
       if (err.name === 'AbortError') {
         console.log(`Generation aborted for age ${currentTargetAge}`);
       } else {
-        console.error('Error generating image:', err);
+        console.error('Error retrying image generation:', err);
         setSnapshots((prev) =>
           prev.map((s) => (s.id === cardId ? { ...s, status: 'error', errorMsg: 'Failed' } : s))
         );
-        setApiStatus('error');
-        setTimeout(() => setApiStatus('idle'), 3000);
       }
     } finally {
       activeControllersRef.current = activeControllersRef.current.filter((c) => c !== controller);
-      setApiStatus('idle');
     }
   };
 
@@ -352,6 +414,14 @@ export default function App() {
       if (!data.output) throw new Error('No video URL returned');
 
       setTimelineVideoUrl(data.output);
+      setOverlayImage({
+        id: `video-${Date.now()}`,
+        status: 'success',
+        url: data.output,
+        age: `${userAge}-80 Video`,
+        time: new Date().toLocaleTimeString(),
+        isVideo: true
+      });
     } catch (err) {
       console.error('Video generation error:', err);
       setApiStatus('error');
@@ -396,7 +466,7 @@ export default function App() {
       {cameraPermissionStatus !== 'granted' && (
         <div className="permission-screen-overlay">
           <div className="permission-screen">
-            <div className="permission-screen__icon">📷</div>
+            <div className="permission-screen__icon"></div>
             <h2 className="permission-screen__title">Camera Access Required</h2>
             <p className="permission-screen__text">
               AgeWarp needs camera access to detect your face and gestures.
@@ -461,7 +531,7 @@ export default function App() {
             </span>
           </div>
 
-          <div className="webcam-panel">
+          <div className={`webcam-panel ${isWebcamExpanded ? 'webcam-panel--expanded' : ''}`}>
             {cameraPermissionStatus === 'granted' && (
               <WebcamFeed
                 ref={webcamRef}
@@ -471,39 +541,23 @@ export default function App() {
                 countdown={countdown}
               />
             )}
+
+            {/* Expand webcam height button */}
+            <button
+              className="webcam-expand-btn"
+              onClick={() => setIsWebcamExpanded(!isWebcamExpanded)}
+              title={isWebcamExpanded ? "Collapse webcam height" : "Expand webcam height"}
+            >
+              ⤢
+            </button>
             
             {/* Gesture Hint Bar */}
             <div className="gesture-hint-bar">
-              <div className="gesture-hint">✊ <span>Capture</span></div>
-              <div className="gesture-hint">☝️ <span>+1 Age</span></div>
-              <div className="gesture-hint">👇 <span>-1 Age</span></div>
-              <div className="gesture-hint">✌️ <span>Cancel</span></div>
+              <div className="gesture-hint"><span>CAPTURE</span></div>
+              <div className="gesture-hint"><span>AGE +</span></div>
+              <div className="gesture-hint"><span>AGE −</span></div>
+              <div className="gesture-hint"><span>CANCEL</span></div>
             </div>
-          </div>
-
-          {/* Resizable Webcam Width Bar */}
-          <div className="webcam-resize-bar">
-            <button
-              className={`resize-btn ${leftPanelWidth === '30%' ? 'active' : ''}`}
-              onClick={() => setLeftPanelWidth('30%')}
-              title="Shrink webcam layout"
-            >
-              ⊖ Shrink (30%)
-            </button>
-            <button
-              className={`resize-btn ${leftPanelWidth === '40%' ? 'active' : ''}`}
-              onClick={() => setLeftPanelWidth('40%')}
-              title="Default webcam layout"
-            >
-              ⊙ Default (40%)
-            </button>
-            <button
-              className={`resize-btn ${leftPanelWidth === '60%' ? 'active' : ''}`}
-              onClick={() => setLeftPanelWidth('60%')}
-              title="Expand webcam layout"
-            >
-              ⊕ Expand (60%)
-            </button>
           </div>
 
           {/* Interactive Controls Panel */}
@@ -524,73 +578,111 @@ export default function App() {
                   onClick={generateFullTimeline}
                   disabled={!lastSnapshot || apiStatus === 'loading'}
                 >
-                  📅 Generate Full Timeline (0-80)
+                  GENERATE TIMELINE
                 </button>
                 <button
                   className="action-btn action-btn--video"
                   onClick={handleGenerateVideo}
                   disabled={!lastSnapshot || isVideoLoading || apiStatus === 'loading'}
                 >
-                  {isVideoLoading ? 'Generating Video...' : '📹 Generate Video'}
+                  {isVideoLoading ? 'GENERATING VIDEO...' : 'GENERATE VIDEO'}
                 </button>
               </div>
 
               {apiStatus === 'loading' && (
                 <button className="action-btn action-btn--cancel" onClick={cancelGeneration}>
-                  🛑 Cancel Generation
+                  CANCEL GENERATION
                 </button>
               )}
             </div>
           )}
         </div>
 
-        {/* Right Side: Main visualizer */}
-        <div className="split-right" style={{ width: `calc(100% - ${leftPanelWidth})` }}>
-          {timelineVideoUrl ? (
-            <div className="visualizer-video-wrapper">
-              <video className="visualizer-video" src={timelineVideoUrl} controls autoPlay loop />
-            </div>
-          ) : latestAgedImageUrl ? (
-            <div className="visualizer-image-wrapper">
-              <img className="visualizer-image" src={latestAgedImageUrl} alt="Aged Result" />
-              <button
-                className="visualizer-download-btn"
-                onClick={() => downloadImage(latestAgedImageUrl, targetAge)}
-                title="Download Image"
-              >
-                ⬇ Download Image
-              </button>
+        {/* Right Side: Scrollable snapshot gallery */}
+        <div 
+          className={`split-right${snapshots.length === 0 ? ' split-right--empty' : ''}`} 
+          style={{ width: `calc(100% - ${leftPanelWidth})` }}
+        >
+          {snapshots.length === 0 ? (
+            <div className="visualizer-placeholder-message">
+              CAPTURE A PHOTO TO BEGIN
             </div>
           ) : (
-            /* Empty Right Panel */
-            <div className="visualizer-placeholder">
-              <div className="visualizer-placeholder__silhouette">
-                <svg viewBox="0 0 100 120" className="face-silhouette">
-                  <path
-                    d="M50,15 C32,15 22,28 22,48 C22,64 26,72 32,84 C38,96 42,102 50,102 C58,102 62,96 68,84 C74,72 78,64 78,48 C78,28 68,15 50,15 Z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 4"
-                    className="face-silhouette__oval"
-                  />
-                  <path
-                    d="M30,110 C35,95 40,90 50,90 C60,90 65,95 70,110"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 4"
-                    className="face-silhouette__shoulders"
-                  />
-                  <circle cx="40" cy="48" r="2" fill="var(--accent)" className="face-silhouette__node" />
-                  <circle cx="60" cy="48" r="2" fill="var(--accent)" className="face-silhouette__node" />
-                  <path d="M47,60 Q50,62 53,60" fill="none" stroke="var(--accent)" strokeWidth="1.5" className="face-silhouette__node" />
-                </svg>
-                <div className="visualizer-placeholder__age-glow">{targetAge}</div>
-              </div>
-              <div className="visualizer-placeholder__instruction">
-                <span className="gesture-icon">✊</span> Hold for 1.5s to generate
-              </div>
+            <div className="snapshot-grid">
+              {snapshots.map((snap) => {
+                const isSuccess = !snap.status || snap.status === 'success';
+                const isPending = snap.status === 'pending';
+                const isProcessing = snap.status === 'processing';
+                const isError = snap.status === 'error';
+
+                return (
+                  <div
+                    key={snap.id}
+                    className={`snapshot-card ${isPending ? 'snapshot-card--pending' : ''} ${
+                      isProcessing ? 'snapshot-card--pending snapshot-card--processing' : ''
+                    } ${isError ? 'snapshot-card--error-state' : ''}`}
+                    onClick={() => isSuccess && snap.url && onCardClick(snap)}
+                  >
+                    {isSuccess && snap.url && (
+                      <>
+                        <img
+                          className="snapshot-card__img"
+                          src={snap.url}
+                          alt={`Age ${snap.age}`}
+                          loading="lazy"
+                        />
+                        <div className="snapshot-card__actions">
+                          <button
+                            className="snapshot-card__btn snapshot-card__btn--download"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              downloadImage(snap.url, snap.age);
+                            }}
+                            title="Download Card"
+                          >
+                            ↓
+                          </button>
+                          <button
+                            className="snapshot-card__btn snapshot-card__btn--delete"
+                            onClick={(e) => deleteSnapshot(snap.id, e)}
+                            title="Delete Card"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    {(isPending || isProcessing) && (
+                      <div className="snapshot-card__loader-wrapper">
+                        <div className="snapshot-card__loader" />
+                        <div className="snapshot-card__loader-text">
+                          {isProcessing ? 'Aging...' : 'Pending'}
+                        </div>
+                      </div>
+                    )}
+
+                    {isError && (
+                      <div className="snapshot-card__error-wrapper" onClick={(e) => e.stopPropagation()}>
+                        <div className="snapshot-card__error-text">
+                          ✕ Failed
+                        </div>
+                        <button
+                          className="snapshot-card__retry-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            retryGeneration(snap);
+                          }}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="snapshot-card__label">Age {snap.age}</div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -613,40 +705,31 @@ export default function App() {
         </div>
       </div>
 
-      {/* Timeline Strip (at the bottom) */}
-      {userAge !== null && (
-        <TimestampStrip
-          ref={timelineRef}
-          snapshots={snapshots}
-          onCardClick={onCardClick}
-          onDeleteClick={deleteSnapshot}
-          onDownloadClick={downloadImage}
-          targetAge={targetAge}
-        />
-      )}
-
       {/* Fullscreen Overlay */}
       {overlayImage && (
         <div className="fullscreen-overlay" onClick={() => setOverlayImage(null)}>
-          <div className="fullscreen-overlay__close-hint">ESC or click to close</div>
+          <div className="fullscreen-overlay__close-hint">ESC or click outside to close</div>
           {overlayImage.status === 'success' && overlayImage.url ? (
-            <>
-              <img className="fullscreen-overlay__img" src={overlayImage.url} alt={`Age ${overlayImage.age}`} />
+            <div className="fullscreen-overlay__content" onClick={(e) => e.stopPropagation()}>
+              {overlayImage.isVideo ? (
+                <video className="fullscreen-overlay__video" src={overlayImage.url} controls autoPlay loop />
+              ) : (
+                <img className="fullscreen-overlay__img" src={overlayImage.url} alt={`Age ${overlayImage.age}`} />
+              )}
               <div className="fullscreen-overlay__label">
                 Age {overlayImage.age} • {overlayImage.time}
               </div>
               <button
                 className="fullscreen-overlay__download-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={() => {
                   downloadImage(overlayImage.url, overlayImage.age);
                 }}
               >
-                ⬇ Download
+                DOWNLOAD
               </button>
-            </>
+            </div>
           ) : (
-            <div className="fullscreen-overlay__loading">
+            <div className="fullscreen-overlay__loading" onClick={(e) => e.stopPropagation()}>
               <div className="fullscreen-overlay__loading-spinner" />
               <div className="fullscreen-overlay__loading-text">
                 {overlayImage.status === 'processing' ? 'Processing Age ' : 'Pending Age '} {overlayImage.age}...
@@ -654,8 +737,7 @@ export default function App() {
               {(overlayImage.status === 'processing' || overlayImage.status === 'pending') && (
                 <button
                   className="fullscreen-overlay__cancel-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
                     cancelGeneration();
                     setOverlayImage(null);
                   }}
@@ -684,7 +766,7 @@ export default function App() {
 
       {/* Error toast */}
       {apiStatus === 'error' && (
-        <div className="error-toast">⚠ API request failed. Try again.</div>
+        <div className="error-toast">API request failed. Try again.</div>
       )}
     </div>
   );

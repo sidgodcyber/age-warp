@@ -8,7 +8,7 @@ const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardCli
   if (snapshots.length === 0) {
     return (
       <div className="timeline-strip timeline-strip--empty" ref={stripRef}>
-        <div className="timeline-strip__empty-text">No timeline snapshots generated yet.</div>
+        <div className="timeline-strip__empty-text" style={{ color: '#1e1e1e', fontSize: '18px' }}>•</div>
       </div>
     );
   }
@@ -51,7 +51,7 @@ const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardCli
                 }}
                 title="Download Card"
               >
-                ⬇
+                ↓
               </button>
             )}
 
@@ -81,7 +81,7 @@ const TimestampStrip = forwardRef(function TimestampStrip({ snapshots, onCardCli
 
             {isError && (
               <div className="timeline-card__error-wrapper" style={{ textAlign: 'center', padding: '12px 0' }}>
-                <div style={{ fontSize: '16px', marginBottom: '6px', color: 'var(--error)' }}>⚠</div>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--error)' }}>!</div>
                 <div className="timeline-card__loader-text" style={{ color: 'var(--error)' }}>
                   {snap.errorMsg || 'Failed'}
                 </div>

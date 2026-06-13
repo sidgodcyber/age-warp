@@ -132,8 +132,7 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
         <>
           <div className="gesture-zone-line" />
           <div className="gesture-zone-box">
-            <span className="gesture-zone-box__icon">👋</span>
-            <span className="gesture-zone-box__text">Show hand here</span>
+            <span className="gesture-zone-box__text">GESTURE ZONE</span>
           </div>
         </>
       )}
@@ -142,14 +141,13 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
       {countdown !== null && (
         <div className="countdown-overlay">
           <div className="countdown-number">
-            {countdown === 0 ? '📸' : countdown}
+            {countdown === 0 ? 'GO' : countdown}
           </div>
         </div>
       )}
 
       {cameraError && (
         <div className="camera-error">
-          <div className="camera-error__icon">🚫</div>
           <div className="camera-error__title">Camera Access Blocked</div>
           <div className="camera-error__msg">
             Please allow camera permissions in your browser settings and refresh the page.
@@ -159,7 +157,6 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
 
       {apiStatus === 'loading' && countdown === null && (
         <div className="loading-overlay-custom">
-          <div className="loading-overlay-custom__icon">⏳</div>
           <div className="loading-overlay-custom__text">
             {isWakingUp ? 'Waking up AI...' : 'Aging...'}
           </div>

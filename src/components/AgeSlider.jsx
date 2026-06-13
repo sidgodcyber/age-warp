@@ -23,7 +23,7 @@ export default function AgeSlider({ currentAge, min = 0, max = 80, onChange }) {
       />
       <div className="age-slider-labels-container">
         <span className="age-slider-text-label">{getAgeLabel(currentAge)}</span>
-        <span className="age-slider-hint-text">Move 👆 / 👇 or drag</span>
+        <span className="age-slider-hint-text">Move UP / DOWN or drag</span>
       </div>
     </div>
   );

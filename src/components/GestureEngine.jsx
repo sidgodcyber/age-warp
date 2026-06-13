@@ -105,30 +105,24 @@ export default function GestureEngine({
       ctx.arc(cx, cy, r, startAngle, endAngle);
       ctx.stroke();
 
-      // Emoji and text indicators in the center of the ring
-      let emoji = '';
+      // Text indicators in the center of the ring
       let label = '';
-      if (activeGesture === 'fist') { emoji = '✊'; label = 'Pose'; }
-      else if (activeGesture === 'up') { emoji = '👆'; label = 'Age Up'; }
-      else if (activeGesture === 'down') { emoji = '👇'; label = 'Age Down'; }
-      else if (activeGesture === 'cancel') { emoji = '✌️'; label = 'Cancel'; }
-
-      // Emoji
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '32px system-ui, -apple-system';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(emoji, cx, cy - 22);
+      if (activeGesture === 'fist') { label = 'CAPTURE'; }
+      else if (activeGesture === 'up') { label = 'AGE +'; }
+      else if (activeGesture === 'down') { label = 'AGE −'; }
+      else if (activeGesture === 'cancel') { label = 'CANCEL'; }
 
       // Label description
-      ctx.fillStyle = '#a0a0a0';
-      ctx.font = 'bold 11px "JetBrains Mono", monospace';
-      ctx.fillText(label.toUpperCase(), cx, cy + 16);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, cx, cy - 10);
 
       // Percentage
       ctx.fillStyle = '#00ff88';
       ctx.font = 'bold 20px "JetBrains Mono", monospace';
-      ctx.fillText(`${Math.round(holdProgress)}%`, cx, cy + 38);
+      ctx.fillText(`${Math.round(holdProgress)}%`, cx, cy + 15);
 
       ctx.restore();
     }

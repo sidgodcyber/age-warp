@@ -1,5 +1,3 @@
-import { Client } from "@gradio/client";
-
 export default async function handler(req, res) {
   try {
     const { type = 'image', imageBase64, sourceAge, targetAge, duration = 5, fps = 24 } = req.body;
@@ -7,41 +5,91 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing params" });
     }
 
-    // Convert base64 to blob
+    // Step 1: Upload image to HF Space using native FormData (Gradio expects multipart files key)
     const buffer = Buffer.from(imageBase64, 'base64');
+    const formData = new FormData();
     const blob = new Blob([buffer], { type: 'image/jpeg' });
-
-    // Connect to the free HF Space
-    const client = await Client.connect("Robys01/Face-Aging");
+    formData.append('files', blob, 'image.jpg');
     
+    const uploadRes = await fetch(
+      'https://robys01-face-aging.hf.space/gradio_api/upload',
+      {
+        method: 'POST',
+        body: formData
+      }
+    );
+    const uploadData = await uploadRes.json();
+    console.log('Upload response:', uploadData);
+    
+    if (uploadRes.status !== 200 || !Array.isArray(uploadData) || uploadData.length === 0) {
+      throw new Error(`Upload failed: ${JSON.stringify(uploadData)}`);
+    }
+    const filePath = uploadData[0];
+
+    // Step 2: Call predict endpoint
+    let predictRes;
     if (type === 'video') {
-      console.log(`[api/age] Running video prediction: source: ${sourceAge}, target: ${targetAge}`);
-      const result = await client.predict("/predict_1", {
-        image_path: blob,
-        source_age: Number(sourceAge),
-        target_age: Number(targetAge),
-        duration: Number(duration),
-        fps: Number(fps),
-      });
-
-      // result.data[0] is typically { video: { url, path }, ... } or contains the URL directly
-      const videoData = result.data[0];
-      const agedVideoUrl = videoData?.video?.url || videoData?.url || videoData;
-      res.json({ output: agedVideoUrl });
+      predictRes = await fetch(
+        'https://robys01-face-aging.hf.space/gradio_api/run/predict_1',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            data: [
+              { path: filePath },
+              Number(sourceAge),
+              Number(targetAge),
+              Number(duration),
+              Number(fps)
+            ]
+          })
+        }
+      );
     } else {
-      console.log(`[api/age] Running image prediction: source: ${sourceAge}, target: ${targetAge}`);
-      const result = await client.predict("/predict", {
-        image_path: blob,
-        source_age: Number(sourceAge),
-        target_age: Number(targetAge),
-      });
+      predictRes = await fetch(
+        'https://robys01-face-aging.hf.space/gradio_api/run/predict',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            data: [
+              { path: filePath },
+              Number(sourceAge),
+              Number(targetAge)
+            ]
+          })
+        }
+      );
+    }
+    
+    const predictData = await predictRes.json();
+    console.log('Predict response:', predictData);
 
-      const agedImageUrl = result.data[0].url;
-      res.json({ output: agedImageUrl });
+    if (predictData.error) {
+      throw new Error(predictData.error);
+    }
+    if (!predictData.data || predictData.data.length === 0) {
+      throw new Error('Prediction failed: No data returned from Space');
     }
 
+    let outputUrl;
+    if (type === 'video') {
+      const videoData = predictData.data[0];
+      outputUrl = videoData?.video?.url || videoData?.url || videoData;
+      if (typeof outputUrl === 'string' && !outputUrl.startsWith('http')) {
+        outputUrl = 'https://robys01-face-aging.hf.space/gradio_api/file=' + outputUrl;
+      }
+    } else {
+      const imageData = predictData.data[0];
+      outputUrl = imageData.url || 
+                  'https://robys01-face-aging.hf.space/gradio_api/file=' + 
+                  imageData.path;
+    }
+    
+    res.json({ output: outputUrl });
+
   } catch (error) {
-    console.error('HF Space error:', error);
+    console.error('API error:', error);
     res.status(500).json({ error: error.message });
   }
 }
