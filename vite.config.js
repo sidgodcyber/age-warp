@@ -69,7 +69,7 @@ function apiProxyPlugin() {
                 body: JSON.stringify({
                   data: [
                     { path: filePath },
-                    Number(sourceAge),
+                    0,
                     Number(targetAge),
                     Number(duration),
                     Number(fps)

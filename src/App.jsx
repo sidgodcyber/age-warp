@@ -5,7 +5,7 @@ import AgeSlider from './components/AgeSlider';
 
 export default function App() {
   const [userAge, setUserAge] = useState(null);
-  const [modalAge, setModalAge] = useState(21);
+  const [modalAge, setModalAge] = useState('');
   const [targetAge, setTargetAge] = useState(21);
   
   // Camera permission flow
@@ -26,12 +26,13 @@ export default function App() {
   const [latestAgedImageUrl, setLatestAgedImageUrl] = useState(null);
   const [timelineVideoUrl, setTimelineVideoUrl] = useState(null);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('images'); // 'images' | 'video'
 
   // Countdown overlay state
   const [countdown, setCountdown] = useState(null); // null | 3 | 2 | 1 | 0
 
   // Queue states for full timeline
-  const [generationProgress, setGenerationProgress] = useState(null); // null or { current: number, total: number }
+  const [statusBarState, setStatusBarState] = useState(null); // null or { status: 'generating' | 'complete', current: number, total: number }
   const activeControllersRef = useRef([]);
 
   const webcamRef = useRef(null);
@@ -73,16 +74,21 @@ export default function App() {
     }
   }, []);
 
-  // Handle ESC key to close lightbox overlay
+  // Handle keydown shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setOverlayImage(null);
+      } else if (e.key.toLowerCase() === 's') {
+        const canvas = webcamRef.current?.canvasRef?.current;
+        if (canvas) {
+          generateTargetAgeImage(canvas);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [generateTargetAgeImage]);
 
   const requestCameraPermission = async () => {
     try {
@@ -99,11 +105,14 @@ export default function App() {
     setTargetAge(age);
   }, []);
 
+  const ageNum = parseInt(modalAge, 10);
+  const isValidAge = !isNaN(ageNum) && ageNum >= 0 && ageNum <= 80 && modalAge.toString().trim() !== '';
+  const showAgeError = modalAge !== '' && (isNaN(ageNum) || ageNum < 0 || ageNum > 80);
+
   const handleConfirmAge = () => {
-    const age = parseInt(modalAge, 10);
-    if (!isNaN(age) && age > 0 && age < 120) {
-      setUserAge(age);
-      setTargetAge(age);
+    if (isValidAge) {
+      setUserAge(ageNum);
+      setTargetAge(ageNum);
     }
   };
 
@@ -112,7 +121,7 @@ export default function App() {
     console.log('Cancelling generation queue...');
     activeControllersRef.current.forEach((controller) => controller.abort());
     activeControllersRef.current = [];
-    setGenerationProgress(null);
+    setStatusBarState(null);
     setApiStatus('idle');
     setIsWakingUp(false);
     
@@ -313,7 +322,7 @@ export default function App() {
     }));
 
     setSnapshots(initialBatch);
-    setGenerationProgress({ current: 0, total: agesToGenerate.length });
+    setStatusBarState({ status: 'generating', current: 0, total: agesToGenerate.length });
 
     let completedCount = 0;
 
@@ -364,7 +373,7 @@ export default function App() {
         }
 
         completedCount++;
-        setGenerationProgress({ current: completedCount, total: agesToGenerate.length });
+        setStatusBarState({ status: 'generating', current: completedCount, total: agesToGenerate.length });
 
       } catch (err) {
         clearTimeout(wakingTimeout);
@@ -385,7 +394,10 @@ export default function App() {
     }
 
     setApiStatus('idle');
-    setGenerationProgress(null);
+    setStatusBarState({ status: 'complete', current: agesToGenerate.length, total: agesToGenerate.length });
+    setTimeout(() => {
+      setStatusBarState(null);
+    }, 3000);
   };
 
   // Generate video using stored lastSnapshot
@@ -394,6 +406,7 @@ export default function App() {
     
     setIsVideoLoading(true);
     setTimelineVideoUrl(null);
+    setActiveTab('video');
 
     try {
       const res = await fetch('/api/age', {
@@ -402,7 +415,7 @@ export default function App() {
         body: JSON.stringify({
           type: 'video',
           imageBase64: lastSnapshot,
-          sourceAge: userAge,
+          sourceAge: 0,
           targetAge: 80,
           duration: 5,
           fps: 24,
@@ -414,14 +427,6 @@ export default function App() {
       if (!data.output) throw new Error('No video URL returned');
 
       setTimelineVideoUrl(data.output);
-      setOverlayImage({
-        id: `video-${Date.now()}`,
-        status: 'success',
-        url: data.output,
-        age: `${userAge}-80 Video`,
-        time: new Date().toLocaleTimeString(),
-        isVideo: true
-      });
     } catch (err) {
       console.error('Video generation error:', err);
       setApiStatus('error');
@@ -431,8 +436,8 @@ export default function App() {
     }
   };
 
-  // Download aged image helper
-  const downloadImage = async (url, age) => {
+  // Download aged image/video helper
+  const downloadImage = async (url, name, isVideo = false) => {
     if (!url) return;
     try {
       const res = await fetch(url);
@@ -440,7 +445,7 @@ export default function App() {
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `agewarp-age-${age}.jpg`;
+      a.download = isVideo ? `agewarp-${name}.mp4` : `agewarp-age-${name}.jpg`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -459,6 +464,15 @@ export default function App() {
   const onCardClick = useCallback((snap) => {
     setOverlayImage(snap);
   }, []);
+
+  // Expose test helpers for automated validation
+  useEffect(() => {
+    window.__triggerFistAction = triggerFistAction;
+    window.__generateTargetAge = () => {
+      const canvas = webcamRef.current?.canvasRef?.current;
+      if (canvas) generateTargetAgeImage(canvas);
+    };
+  }, [triggerFistAction]);
 
   return (
     <div className="app-container">
@@ -488,22 +502,32 @@ export default function App() {
       {cameraPermissionStatus === 'granted' && userAge === null && (
         <div className="age-modal-overlay">
           <div className="age-modal">
-            <h2 className="age-modal__title">What is your current age?</h2>
+            <h2 className="age-modal__title">How old are you?</h2>
             <div className="age-modal__input-wrapper">
               <input
                 className="age-modal__input"
                 type="number"
-                min="1"
-                max="120"
+                min="0"
+                max="80"
+                placeholder="25"
                 value={modalAge}
                 onChange={(e) => setModalAge(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleConfirmAge();
+                  if (e.key === 'Enter' && isValidAge) handleConfirmAge();
                 }}
                 autoFocus
               />
             </div>
-            <button className="age-modal__btn" onClick={handleConfirmAge}>
+            {showAgeError && (
+              <div className="age-modal__error">
+                Please enter an age between 0 and 80
+              </div>
+            )}
+            <button 
+              className="age-modal__btn" 
+              onClick={handleConfirmAge}
+              disabled={!isValidAge}
+            >
               Confirm
             </button>
           </div>
@@ -526,7 +550,7 @@ export default function App() {
             />
             <span>
               {apiStatus === 'idle' && 'AgeWarp Ready'}
-              {apiStatus === 'loading' && (isWakingUp ? 'Waking up AI...' : 'Processing...')}
+              {apiStatus === 'loading' && 'Processing...'}
               {apiStatus === 'error' && 'Error'}
             </span>
           </div>
@@ -551,12 +575,45 @@ export default function App() {
               ⤢
             </button>
             
-            {/* Gesture Hint Bar */}
-            <div className="gesture-hint-bar">
-              <div className="gesture-hint"><span>CAPTURE</span></div>
-              <div className="gesture-hint"><span>AGE +</span></div>
-              <div className="gesture-hint"><span>AGE −</span></div>
-              <div className="gesture-hint"><span>CANCEL</span></div>
+          </div>
+          
+          <div className="gesture-instruction-bar">
+            <div className="gesture-instruction-item">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <rect x="6" y="10" width="16" height="14" rx="3" stroke="#2e2e2e" stroke-width="1"/>
+                <rect x="9" y="5" width="10" height="8" rx="2" stroke="#2e2e2e" stroke-width="1"/>
+              </svg>
+              <div className="gesture-instruction-text-1">FIST</div>
+              <div className="gesture-instruction-text-2">hold to capture</div>
+            </div>
+            <div className="gesture-instruction-item">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <rect x="8" y="12" width="12" height="12" rx="3" stroke="#2e2e2e" stroke-width="1"/>
+                <rect x="11" y="4" width="6" height="12" rx="2" stroke="#2e2e2e" stroke-width="1"/>
+                <line x1="14" y1="4" x2="14" y2="1" stroke="#2e2e2e" stroke-width="1"/>
+                <polyline points="11,3 14,0 17,3" fill="none" stroke="#2e2e2e" stroke-width="1"/>
+              </svg>
+              <div className="gesture-instruction-text-1">INDEX ↑</div>
+              <div className="gesture-instruction-text-2">age +</div>
+            </div>
+            <div className="gesture-instruction-item">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <rect x="8" y="4" width="12" height="12" rx="3" stroke="#2e2e2e" stroke-width="1"/>
+                <rect x="11" y="12" width="6" height="12" rx="2" stroke="#2e2e2e" stroke-width="1"/>
+                <line x1="14" y1="24" x2="14" y2="27" stroke="#2e2e2e" stroke-width="1"/>
+                <polyline points="11,25 14,28 17,25" fill="none" stroke="#2e2e2e" stroke-width="1"/>
+              </svg>
+              <div className="gesture-instruction-text-1">INDEX ↓</div>
+              <div className="gesture-instruction-text-2">age −</div>
+            </div>
+            <div className="gesture-instruction-item">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <rect x="8" y="14" width="12" height="10" rx="3" stroke="#2e2e2e" stroke-width="1"/>
+                <rect x="8" y="4" width="5" height="14" rx="2" stroke="#2e2e2e" stroke-width="1"/>
+                <rect x="15" y="4" width="5" height="14" rx="2" stroke="#2e2e2e" stroke-width="1"/>
+              </svg>
+              <div className="gesture-instruction-text-1">PEACE</div>
+              <div className="gesture-instruction-text-2">cancel</div>
             </div>
           </div>
 
@@ -600,106 +657,164 @@ export default function App() {
 
         {/* Right Side: Scrollable snapshot gallery */}
         <div 
-          className={`split-right${snapshots.length === 0 ? ' split-right--empty' : ''}`} 
+          className="split-right" 
           style={{ width: `calc(100% - ${leftPanelWidth})` }}
         >
-          {snapshots.length === 0 ? (
-            <div className="visualizer-placeholder-message">
-              CAPTURE A PHOTO TO BEGIN
-            </div>
-          ) : (
-            <div className="snapshot-grid">
-              {snapshots.map((snap) => {
-                const isSuccess = !snap.status || snap.status === 'success';
-                const isPending = snap.status === 'pending';
-                const isProcessing = snap.status === 'processing';
-                const isError = snap.status === 'error';
+          {/* Tab Bar */}
+          <div className="right-panel-tabs">
+            <button 
+              className={`right-panel-tab${activeTab === 'images' ? ' right-panel-tab--active' : ''}`}
+              onClick={() => setActiveTab('images')}
+            >
+              IMAGES
+            </button>
+            <button 
+              className={`right-panel-tab${activeTab === 'video' ? ' right-panel-tab--active' : ''}`}
+              onClick={() => setActiveTab('video')}
+            >
+              VIDEO
+            </button>
+          </div>
 
-                return (
-                  <div
-                    key={snap.id}
-                    className={`snapshot-card ${isPending ? 'snapshot-card--pending' : ''} ${
-                      isProcessing ? 'snapshot-card--pending snapshot-card--processing' : ''
-                    } ${isError ? 'snapshot-card--error-state' : ''}`}
-                    onClick={() => isSuccess && snap.url && onCardClick(snap)}
-                  >
-                    {isSuccess && snap.url && (
-                      <>
-                        <img
-                          className="snapshot-card__img"
-                          src={snap.url}
-                          alt={`Age ${snap.age}`}
-                          loading="lazy"
-                        />
-                        <div className="snapshot-card__actions">
+          {statusBarState && (
+            <div className="status-bar-top">
+              <span className="status-bar-top__text">
+                {statusBarState.status === 'generating' ? 'GENERATING' : 'COMPLETE'}  {statusBarState.current} / {statusBarState.total}
+              </span>
+              <div className="status-bar-top__progress-container">
+                <div 
+                  className="status-bar-top__progress-fill" 
+                  style={{ width: `${(statusBarState.current / statusBarState.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'images' ? (
+            snapshots.length === 0 ? (
+              <div className="visualizer-placeholder-message">
+                CAPTURE A PHOTO TO BEGIN
+              </div>
+            ) : (
+              <div className="snapshot-grid">
+                {snapshots.map((snap) => {
+                  const isSuccess = !snap.status || snap.status === 'success';
+                  const isPending = snap.status === 'pending';
+                  const isProcessing = snap.status === 'processing';
+                  const isError = snap.status === 'error';
+
+                  return (
+                    <div
+                      key={snap.id}
+                      className={`snapshot-card ${isPending ? 'snapshot-card--pending' : ''} ${
+                        isProcessing ? 'snapshot-card--pending snapshot-card--processing' : ''
+                      } ${isError ? 'snapshot-card--error-state' : ''}`}
+                      onClick={() => isSuccess && snap.url && onCardClick(snap)}
+                    >
+                      {isSuccess && snap.url && (
+                        <>
+                          <img
+                            className="snapshot-card__img"
+                            src={snap.url}
+                            alt={`Age ${snap.age}`}
+                            loading="lazy"
+                          />
+                          <div className="snapshot-card__actions">
+                            <button
+                              className="snapshot-card__btn snapshot-card__btn--download"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadImage(snap.url, snap.age);
+                              }}
+                              title="Download Card"
+                            >
+                              ↓
+                            </button>
+                            <button
+                              className="snapshot-card__btn snapshot-card__btn--delete"
+                              onClick={(e) => deleteSnapshot(snap.id, e)}
+                              title="Delete Card"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {(isPending || isProcessing) && (
+                        <div className="snapshot-card__loader-wrapper">
+                          <div className="snapshot-card__loader" />
+                          <div className="snapshot-card__loader-text">
+                            {isProcessing ? 'Aging...' : 'Pending'}
+                          </div>
+                        </div>
+                      )}
+
+                      {isError && (
+                        <>
                           <button
-                            className="snapshot-card__btn snapshot-card__btn--download"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              downloadImage(snap.url, snap.age);
-                            }}
-                            title="Download Card"
-                          >
-                            ↓
-                          </button>
-                          <button
-                            className="snapshot-card__btn snapshot-card__btn--delete"
+                            className="snapshot-card__failed-delete-btn"
                             onClick={(e) => deleteSnapshot(snap.id, e)}
                             title="Delete Card"
                           >
                             ✕
                           </button>
-                        </div>
-                      </>
-                    )}
+                          <div className="snapshot-card__error-wrapper" onClick={(e) => e.stopPropagation()}>
+                            <div className="snapshot-card__error-text">
+                              ✕ Failed
+                            </div>
+                            <button
+                              className="snapshot-card__retry-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                retryGeneration(snap);
+                              }}
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        </>
+                      )}
 
-                    {(isPending || isProcessing) && (
-                      <div className="snapshot-card__loader-wrapper">
-                        <div className="snapshot-card__loader" />
-                        <div className="snapshot-card__loader-text">
-                          {isProcessing ? 'Aging...' : 'Pending'}
-                        </div>
-                      </div>
-                    )}
-
-                    {isError && (
-                      <div className="snapshot-card__error-wrapper" onClick={(e) => e.stopPropagation()}>
-                        <div className="snapshot-card__error-text">
-                          ✕ Failed
-                        </div>
-                        <button
-                          className="snapshot-card__retry-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            retryGeneration(snap);
-                          }}
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="snapshot-card__label">Age {snap.age}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Sequential queue loading overlay */}
-          {generationProgress && (
-            <div className="queue-overlay">
-              <div className="queue-overlay__spinner" />
-              <div className="queue-overlay__text">Generating Timeline...</div>
-              <div className="queue-overlay__progress-text">
-                {generationProgress.current} / {generationProgress.total} ages completed
+                      <div className="snapshot-card__label">Age {snap.age}</div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="queue-overlay__bar-container">
-                <div
-                  className="queue-overlay__bar-fill"
-                  style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}
-                />
-              </div>
+            )
+          ) : (
+            <div className="video-tab-panel">
+              {isVideoLoading ? (
+                <div className="video-tab-panel__generating">
+                  <div className="video-tab-spinner" />
+                  <div className="video-tab-panel__generating-text">GENERATING VIDEO</div>
+                </div>
+              ) : (
+                <>
+                  <div className="video-tab-panel__label">GENERATED VIDEO</div>
+                  {!timelineVideoUrl ? (
+                    <div className="video-tab-panel__placeholder">
+                      click generate video to create an aging timelapse
+                    </div>
+                  ) : (
+                    <div className="video-tab-panel__content">
+                      <video 
+                        className="video-tab-panel__video" 
+                        src={timelineVideoUrl} 
+                        controls 
+                        autoPlay 
+                        loop 
+                      />
+                      <button 
+                        className="video-tab-panel__download-btn"
+                        onClick={() => downloadImage(timelineVideoUrl, 'timelapse', true)}
+                      >
+                        DOWNLOAD VIDEO
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>

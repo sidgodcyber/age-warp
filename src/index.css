@@ -70,7 +70,7 @@ body {
   background: var(--bg-primary);
   display: block;
   overflow-y: auto;
-  padding: 4px;
+  padding: 0;
   position: relative;
   transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   scrollbar-width: none;
@@ -95,7 +95,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.9);
+  background: #0a0a0a;
   backdrop-filter: blur(16px);
   z-index: 1000;
   display: flex;
@@ -104,13 +104,13 @@ body {
 }
 
 .age-modal {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: #111111;
+  border: 1px solid #1e1e1e;
   border-radius: 16px;
   padding: 40px;
   width: 360px;
   text-align: center;
-  box-shadow: 0 0 50px rgba(0, 255, 136, 0.1);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -137,19 +137,19 @@ body {
   width: 100px;
   height: 60px;
   background: rgba(255, 255, 255, 0.02);
-  border: 2px solid var(--border);
+  border: 1px solid #2a2a2a;
   border-radius: 12px;
   font-size: 28px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--text-primary);
   text-align: center;
   outline: none;
-  transition: border-color 0.25s, box-shadow 0.25s;
+  transition: border-color 0.25s;
 }
 
 .age-modal__input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 12px var(--accent-glow);
+  border-color: #444444;
+  box-shadow: none;
 }
 
 .age-modal__input::-webkit-outer-spin-button,
@@ -159,21 +159,36 @@ body {
 }
 
 .age-modal__btn {
-  background: var(--accent);
-  color: var(--bg-primary);
-  border: none;
+  background: #1a1a1a;
+  color: #888888;
+  border: 1px solid #2a2a2a;
   border-radius: 8px;
   padding: 12px 24px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: background-color 0.2s, color 0.2s;
 }
 
-.age-modal__btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px var(--accent-glow);
+.age-modal__btn:hover:not(:disabled) {
+  background: #222222;
+  color: #cccccc;
 }
+
+.age-modal__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.age-modal__error {
+  font-size: 11px;
+  color: #ff4444;
+  margin-top: 4px;
+  text-align: center;
+}
+
 
 /* ===== Webcam Feed Layout ===== */
 .webcam-panel {
@@ -308,33 +323,50 @@ body {
 }
 
 /* ===== Gesture Hint Bar ===== */
-.gesture-hint-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(10, 10, 10, 0.85);
-  backdrop-filter: blur(6px);
-  border-top: 1px solid var(--border);
-  padding: 8px 12px;
+/* ===== Gesture Instruction Bar ===== */
+.gesture-instruction-bar {
+  background: #0a0a0a;
+  border-top: 1px solid #1a1a1a;
+  border-bottom: 1px solid #1a1a1a;
+  padding: 10px 0;
   display: flex;
   justify-content: space-around;
-  z-index: 10;
+  width: calc(100% + 48px);
+  margin-left: -24px;
+  margin-right: -24px;
+  box-sizing: border-box;
 }
 
-.gesture-hint {
-  font-size: 12px;
+.gesture-instruction-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
-  color: var(--text-secondary);
 }
 
-.gesture-hint span {
-  font-size: 10px;
+.gesture-instruction-item svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.gesture-instruction-text-1 {
+  font-size: 8px;
+  color: #444444;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
   font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.gesture-instruction-text-2 {
+  font-size: 8px;
+  color: #2a2a2a;
+  letter-spacing: 1px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 /* ===== Controls Panel ===== */
@@ -426,6 +458,10 @@ body {
   font-family: 'Inter', sans-serif;
   letter-spacing: 1px;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 120px);
 }
 
 .visualizer-placeholder__icon {
@@ -469,66 +505,39 @@ body {
   to { opacity: 1; }
 }
 
-/* ===== Queue Loading Overlay ===== */
-.queue-overlay {
-  position: absolute;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(20, 20, 20, 0.95);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 24px;
-  width: 320px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  z-index: 15;
-  animation: slide-up-fade 0.3s ease-out;
-}
-
-@keyframes slide-up-fade {
-  from { transform: translate(-50%, 10px); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
-}
-
-.queue-overlay__spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid rgba(0, 255, 136, 0.1);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.queue-overlay__text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.queue-overlay__progress-text {
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text-secondary);
-}
-
-.queue-overlay__bar-container {
+/* ===== Top Status Bar ===== */
+.status-bar-top {
+  position: sticky;
+  top: 0;
+  left: 0;
   width: 100%;
+  height: 32px;
+  background: #111111;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 10;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.status-bar-top__text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #555555;
+  letter-spacing: 0.5px;
+}
+
+.status-bar-top__progress-container {
+  width: 120px;
   height: 4px;
-  background: var(--border);
+  background: #222222;
   border-radius: 2px;
   overflow: hidden;
-  margin-top: 4px;
 }
 
-.queue-overlay__bar-fill {
+.status-bar-top__progress-fill {
   height: 100%;
   background: var(--accent);
   transition: width 0.3s ease-out;
@@ -1042,36 +1051,35 @@ body {
 }
 
 /* ===== 3-Second Snapshot Countdown Overlay ===== */
-.countdown-overlay {
+.countdown-overlay-corner {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  font-size: 32px;
+  font-weight: 200;
+  color: rgba(255, 255, 255, 0.7);
+  z-index: 10;
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.shutter-flash {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.65);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9;
+  background: #ffffff;
+  pointer-events: none;
+  z-index: 15;
+  animation: shutter 150ms ease-out forwards;
 }
 
-.countdown-number {
-  font-size: 96px;
-  font-weight: 800;
-  color: var(--accent);
-  text-shadow: 0 0 30px var(--accent-glow);
-  animation: countdown-bounce 0.6s ease-out infinite alternate;
-}
-
-@keyframes countdown-bounce {
-  from {
-    transform: scale(0.8);
-    opacity: 0.8;
-  }
-  to {
-    transform: scale(1.15);
-    opacity: 1;
-  }
+@keyframes shutter {
+  0% { opacity: 0; }
+  50% { opacity: 0.4; }
+  100% { opacity: 0; }
 }
 
 /* ===== Custom Loading Overlay (Replacing Hidden Replicate Loader) ===== */
@@ -1335,6 +1343,8 @@ body {
   grid-template-columns: repeat(2, 1fr);
   gap: 4px;
   width: 100%;
+  padding: 4px;
+  box-sizing: border-box;
 }
 
 .snapshot-card {
@@ -1497,6 +1507,171 @@ body {
   background: #3a3a3a;
   border-color: var(--accent);
 }
+
+.snapshot-card__failed-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  background: #1a1a1a;
+  color: #555555;
+  border: 1px solid #2a2a2a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  font-size: 10px;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.snapshot-card__failed-delete-btn:hover {
+  color: #ff4444;
+}
+
+/* ===== Right Panel Tab Bar ===== */
+.right-panel-tabs {
+  display: flex;
+  width: 100%;
+  height: 36px;
+  background: #0d0d0d;
+  border-bottom: 1px solid #1a1a1a;
+  box-sizing: border-box;
+}
+
+.right-panel-tab {
+  width: 50%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #333333;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  border-radius: 0;
+}
+
+.right-panel-tab:focus {
+  outline: none;
+}
+
+.right-panel-tab--active {
+  color: #888888;
+  border-bottom: 1px solid #555555;
+}
+
+/* ===== Video Tab Panel ===== */
+.video-tab-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.video-tab-panel__label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #2a2a2a;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 24px;
+}
+
+.video-tab-panel__placeholder {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #222222;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 200px);
+}
+
+.video-tab-panel__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 16px;
+}
+
+.video-tab-panel__video {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #1a1a1a;
+  background: #000;
+}
+
+.video-tab-panel__download-btn {
+  background: transparent;
+  border: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #444444;
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 8px 16px;
+  transition: color 0.15s ease;
+}
+
+.video-tab-panel__download-btn:hover {
+  color: #888888;
+}
+
+/* Generating State Styles */
+.video-tab-panel__generating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 120px);
+  width: 100%;
+}
+
+.video-tab-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+.video-tab-panel__generating-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #333333;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  line-height: 1.2;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 
 
 

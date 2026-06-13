@@ -187,30 +187,38 @@ export default function GestureEngine({
           }
 
           if (detectedGesture) {
-            if (activeGestureRef.current !== detectedGesture) {
-              activeGestureRef.current = detectedGesture;
-              holdStartTimeRef.current = Date.now();
-              actionTriggeredRef.current = false;
-            } else if (!actionTriggeredRef.current) {
-              const elapsed = Date.now() - holdStartTimeRef.current;
-              const progress = Math.min(100, (elapsed / 1500) * 100);
-
-              if (elapsed >= 1500) {
+            if (detectedGesture === 'cancel') {
+              if (activeGestureRef.current !== 'cancel' || !actionTriggeredRef.current) {
+                activeGestureRef.current = 'cancel';
                 actionTriggeredRef.current = true;
-                // Trigger action
-                if (detectedGesture === 'fist') {
-                  onFistGesture();
-                } else if (detectedGesture === 'up') {
-                  onAgeChange(Math.min(80, currentAge + 1));
-                } else if (detectedGesture === 'down') {
-                  onAgeChange(Math.max(0, currentAge - 1));
-                } else if (detectedGesture === 'cancel') {
-                  cancelGeneration();
-                }
+                holdStartTimeRef.current = Date.now();
+                cancelGeneration();
               }
-              drawOverlay(landmarks, detectedGesture, progress);
+              drawOverlay(landmarks, 'cancel', 100);
             } else {
-              drawOverlay(landmarks, detectedGesture, 100);
+              if (activeGestureRef.current !== detectedGesture) {
+                activeGestureRef.current = detectedGesture;
+                holdStartTimeRef.current = Date.now();
+                actionTriggeredRef.current = false;
+              } else if (!actionTriggeredRef.current) {
+                const elapsed = Date.now() - holdStartTimeRef.current;
+                const progress = Math.min(100, (elapsed / 1500) * 100);
+
+                if (elapsed >= 1500) {
+                  actionTriggeredRef.current = true;
+                  // Trigger action
+                  if (detectedGesture === 'fist') {
+                    onFistGesture();
+                  } else if (detectedGesture === 'up') {
+                    onAgeChange(Math.min(80, currentAge + 1));
+                  } else if (detectedGesture === 'down') {
+                    onAgeChange(Math.max(0, currentAge - 1));
+                  }
+                }
+                drawOverlay(landmarks, detectedGesture, progress);
+              } else {
+                drawOverlay(landmarks, detectedGesture, 100);
+              }
             }
           } else {
             resetHoldTracker();

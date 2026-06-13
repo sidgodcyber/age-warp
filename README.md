@@ -1,6 +1,6 @@
 # AgeWarp
 
-Gesture-controlled face aging simulator powered by AI. Move your palm left/right to select a target age, then hold a fist for 800ms to generate an age-transformed photo using the Replicate SAM model.
+Gesture-controlled face aging simulator powered by AI. Mirrored camera feed detects hands to select target age, capture snapshots, and animate transitions.
 
 ---
 
@@ -8,9 +8,9 @@ Gesture-controlled face aging simulator powered by AI. Move your palm left/right
 
 - **Frontend:** React 18 + Vite 5
 - **Gesture Tracking:** MediaPipe Hands (CDN)
-- **API Proxy:** Vercel Serverless Function (`/api/age.js`)
+- **API Proxy:** Vercel Serverless Function (`/api/age.js`) & Vite local API Proxy middleware
 - **AI Model:** Hugging Face Space — `Robys01/Face-Aging` (free & public)
-- **Styling:** Vanilla CSS, dark theme, glassmorphism
+- **Styling:** Vanilla CSS, dark theme, flat aesthetics
 
 ---
 
@@ -21,12 +21,12 @@ Gesture-controlled face aging simulator powered by AI. Move your palm left/right
 npm install
 
 # 2. Start the dev server
-npx vite
+npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in Chrome (camera required).
 
-> **Note:** The `/api/age` endpoint works out-of-the-box locally with `npx vite` using a custom Vite API proxy plugin that connects directly to the Hugging Face Space. No API keys are required as the Space is public and free! Note that the first call may take 30-60 seconds if the Space is sleeping.
+> **Note:** The `/api/age` endpoint works out-of-the-box locally using the custom Vite API proxy plugin that connects directly to the Hugging Face Space. No API keys are required as the Space is public and free!
 
 ---
 
@@ -36,10 +36,7 @@ Open [http://localhost:5173](http://localhost:5173) in Chrome (camera required).
 # 1. Install Vercel CLI
 npm i -g vercel
 
-# 2. Set your API token as an environment variable
-vercel env add REPLICATE_API_TOKEN
-
-# 3. Deploy
+# 2. Deploy
 vercel --prod
 ```
 
@@ -47,58 +44,51 @@ The `vercel.json` config is already set up — just push and deploy.
 
 ---
 
+## Age Setup Modal
+
+Upon page load, users are prompted with a secure, non-glowing age input modal:
+- **Empty Default**: Starts completely empty with the placeholder `"25"`.
+- **Validation**: Accepts numeric values between `0` and `80`. Entering values outside this range displays an inline red error message.
+- **Form Controls**: The Confirm button stays disabled until a valid age is entered.
+
+---
+
 ## Gesture Controls
 
-| Gesture | Action |
-|---------|--------|
-| **Open palm, move left/right** | Select target age (0–80) |
-| **Hold fist for 800ms** | Capture snapshot → send to AI for aging |
-| **Fast palm swipe left** | Scroll timeline strip right |
-| **Fast palm swipe right** | Scroll timeline strip left |
-| **Click timeline card** | View fullscreen |
-| **ESC / click backdrop** | Close fullscreen view |
+The application maps active gestures detected within the **Gesture Zone** (left 30% of the camera frame):
+
+| Gesture | Delay | Action |
+|---------|-------|--------|
+| **FIST (✊)** | 1.5s Hold | Captures photo → initiates AI generation for current target age |
+| **INDEX UP (Index Finger ↑)** | 1.5s Hold | Increases target age |
+| **INDEX DOWN (Index Finger ↓)** | 1.5s Hold | Decreases target age |
+| **PEACE (✌️ / Index + Middle Extended)** | **Immediate** | Aborts all pending API calls and cancels active queue generations |
 
 ---
 
-## Age Bucket Mode
+## Camera App Countdown
 
-When `BUCKET_MODE = true` (default) in `GestureEngine.jsx`, palm position snaps to 6 zones:
-
-| Palm Zone | Target Age | Label |
-|-----------|-----------|-------|
-| 0–16% | 5 | Child |
-| 17–33% | 15 | Teen |
-| 34–50% | 28 | Young Adult |
-| 51–66% | 43 | Middle Age |
-| 67–83% | 58 | Senior |
-| 84–100% | 73 | Elderly |
-
-Set `BUCKET_MODE = false` for continuous 0–80 mapping.
+When a capture is triggered:
+- **Corner Timer**: A thin transparent white countdown number (`3` -> `2` -> `1`) displays in the bottom-right corner of the camera feed.
+- **Camera Shutter Flash**: At `0` (snapshot moment), a white overlay flashes (`0` → `0.4` → `0` opacity) over `150ms` across the webcam frame.
 
 ---
 
-## File Structure
+## Right Panel Layout (IMAGES & VIDEO Tabs)
 
-```
-age-warp/
-├── api/
-│   └── age.js              # Vercel serverless proxy → Replicate API
-├── src/
-│   ├── components/
-│   │   ├── AgeSlider.jsx    # Right-side age display
-│   │   ├── GestureEngine.jsx # MediaPipe hand tracking + gestures
-│   │   ├── TimestampStrip.jsx # Bottom timeline gallery
-│   │   └── WebcamFeed.jsx   # Mirrored webcam + overlays
-│   ├── App.jsx              # Main application orchestrator
-│   ├── index.css            # Global design system
-│   └── main.jsx             # Vite entry point
-├── .env                     # REPLICATE_API_TOKEN (never commit)
-├── .gitignore
-├── index.html               # MediaPipe CDN + Vite mount
-├── package.json
-├── README.md
-└── vercel.json              # Vercel deployment config
-```
+The right panel features a `36px` high toggle tab bar to switch between gallery formats:
+
+### 1. IMAGES Tab (Default Active)
+- **Grid Layout**: Displays a 2-column grid of snapshots.
+- **Card Actions**: Successful cards show download (`↓`) and delete (`✕`) controls only on hover.
+- **Failure States**: Failed cards display a persistent `"✕ Failed"` overlay with a **Retry** button and a top-right circular close button (`✕`) that is always visible.
+- **Status Bar**: A top status bar tracks bulk timeline generation progress (`GENERATING 8 / 17`) and shows `COMPLETE 17 / 17` for 3 seconds before hiding.
+
+### 2. VIDEO Tab
+- **Timelapses**: Displays the generated video timelapses showing aging transitions.
+- **Baby-to-Senior Transition**: Automatically configures the source age to `0` and target age to `80` to render the transition from birth.
+- **Player & Downloads**: Features a built-in player that spans the full panel width, complete with a clean download button (`DOWNLOAD VIDEO`).
+- **Auto-Switching**: Triggering a video generation from the controls panel automatically switches focus to the Video tab upon completion.
 
 ---
 

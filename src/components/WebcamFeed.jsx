@@ -138,12 +138,15 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
       )}
 
       {/* 3-Second Countdown Overlay */}
-      {countdown !== null && (
-        <div className="countdown-overlay">
-          <div className="countdown-number">
-            {countdown === 0 ? 'GO' : countdown}
-          </div>
+      {countdown !== null && countdown > 0 && (
+        <div className="countdown-overlay-corner">
+          {countdown}
         </div>
+      )}
+
+      {/* Shutter Flash Overlay */}
+      {countdown === 0 && (
+        <div className="shutter-flash" />
       )}
 
       {cameraError && (
@@ -158,12 +161,10 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
       {apiStatus === 'loading' && countdown === null && (
         <div className="loading-overlay-custom">
           <div className="loading-overlay-custom__text">
-            {isWakingUp ? 'Waking up AI...' : 'Aging...'}
+            Aging...
           </div>
           <div className="loading-overlay-custom__subtext">
-            {isWakingUp
-              ? 'Please wait, booting the free Hugging Face Space (first call takes 30-60s).'
-              : `Generating age ${currentAge} • ~15 seconds`}
+            Generating age {currentAge} • ~15 seconds
           </div>
           <div className="loading-overlay-custom__progress">
             <div className="loading-overlay-custom__progress-bar" />
