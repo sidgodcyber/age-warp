@@ -1,3 +1,5 @@
+const FormData = require('form-data');
+
 export default async function handler(event, context) {
   if (event.httpMethod !== 'POST') {
     return {
@@ -18,27 +20,27 @@ export default async function handler(event, context) {
       };
     }
 
-    console.log('[age] Connecting to HF Gradio Space Robys01/Face-Aging via fetch...');
+    console.log('[age] Connecting to HF Gradio Space...');
     
     // Convert base64 to buffer
     const buffer = Buffer.from(imageBase64, 'base64');
-    const formData = new FormData();
-    const blob = new Blob([buffer], { type: 'image/jpeg' });
-    formData.append('files', blob, 'image.jpg');
+    const form = new FormData();
+    form.append('files', buffer, { filename: 'image.jpg' });
 
     // Upload image
     const uploadRes = await fetch(
       'https://robys01-face-aging.hf.space/gradio_api/upload',
       {
         method: 'POST',
-        body: formData,
-        timeout: 30000
+        body: form,
+        headers: form.getHeaders()
       }
     );
     const uploadData = await uploadRes.json();
-    console.log('Upload response:', uploadData);
+    console.log('[age] Upload response:', uploadData);
     
     if (uploadRes.status !== 200 || !Array.isArray(uploadData) || uploadData.length === 0) {
+      console.error('[age] Upload failed:', uploadData);
       throw new Error(`Upload failed: ${JSON.stringify(uploadData)}`);
     }
     const filePath = uploadData[0];
@@ -46,7 +48,7 @@ export default async function handler(event, context) {
     // Call predict endpoint
     let predictRes;
     if (type === 'video') {
-      console.log(`[age] Running video predict_1: age ${sourceAge} -> ${targetAge}, duration ${duration}, fps ${fps}...`);
+      console.log(`[age] Generating video: ${sourceAge} → ${targetAge}`);
       predictRes = await fetch(
         'https://robys01-face-aging.hf.space/gradio_api/run/predict_1',
         {
@@ -60,12 +62,11 @@ export default async function handler(event, context) {
               Number(duration),
               Number(fps)
             ]
-          }),
-          timeout: 60000
+          })
         }
       );
     } else {
-      console.log(`[age] Running image predict: age ${sourceAge} -> ${targetAge}...`);
+      console.log(`[age] Generating image: ${sourceAge} → ${targetAge}`);
       predictRes = await fetch(
         'https://robys01-face-aging.hf.space/gradio_api/run/predict',
         {
@@ -77,20 +78,25 @@ export default async function handler(event, context) {
               Number(sourceAge),
               Number(targetAge)
             ]
-          }),
-          timeout: 60000
+          })
         }
       );
     }
 
+    if (!predictRes.ok) {
+      throw new Error(`Predict request failed with status ${predictRes.status}`);
+    }
+
     const predictData = await predictRes.json();
-    console.log('Predict response:', predictData);
+    console.log('[age] Predict response status:', predictRes.status);
 
     if (predictData.error) {
+      console.error('[age] Prediction error:', predictData.error);
       throw new Error(predictData.error);
     }
     if (!predictData.data || predictData.data.length === 0) {
-      throw new Error('Prediction failed: No data returned from Space');
+      console.error('[age] No data in response');
+      throw new Error('No data returned from prediction');
     }
 
     let outputUrl;
@@ -100,14 +106,14 @@ export default async function handler(event, context) {
       if (typeof outputUrl === 'string' && !outputUrl.startsWith('http')) {
         outputUrl = 'https://robys01-face-aging.hf.space/gradio_api/file=' + outputUrl;
       }
-      console.log(`[age] ✅ Video success! Output: ${outputUrl}`);
     } else {
       const imageData = predictData.data[0];
       outputUrl = imageData.url || 
                   'https://robys01-face-aging.hf.space/gradio_api/file=' + 
                   imageData.path;
-      console.log(`[age] ✅ Image success! Output: ${outputUrl}`);
     }
+
+    console.log('[age] Success:', type, '→', outputUrl);
 
     return {
       statusCode: 200,
@@ -116,7 +122,7 @@ export default async function handler(event, context) {
     };
 
   } catch (error) {
-    console.error('[age] Error:', error.message);
+    console.error('[age] Failed:', error.message);
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json' },
