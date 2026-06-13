@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 
-const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWakingUp, countdown }, ref) {
+const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, generatingAge, isWakingUp, countdown }, ref) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayCanvasRef = useRef(null);
@@ -164,7 +164,7 @@ const WebcamFeed = forwardRef(function WebcamFeed({ apiStatus, currentAge, isWak
             Aging...
           </div>
           <div className="loading-overlay-custom__subtext">
-            Generating age {currentAge} • ~15 seconds
+            Generating age {generatingAge} • ~15 seconds
           </div>
           <div className="loading-overlay-custom__progress">
             <div className="loading-overlay-custom__progress-bar" />

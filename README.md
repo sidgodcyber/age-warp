@@ -1,96 +1,109 @@
 # AgeWarp
 
-Gesture-controlled face aging simulator powered by AI. Mirrored camera feed detects hands to select target age, capture snapshots, and animate transitions.
+Gesture-controlled AI face aging simulator. Hold a fist in your camera to capture and generate photorealistic aged versions of your face at any age (0–80).
 
----
+## Features
 
-## Stack
+- **Gesture Control**: Fist to capture, index up/down to adjust age, peace to cancel
+- **Real-time Generation**: Single capture generates 17 ages (0–80, 5-year intervals)
+- **Live Gallery**: Download/retry/delete individual aged images
+- **Video Timeline**: AI-generated aging timelapse with Dlib face morphing
+- **No Setup**: Browser-based, no API keys, MediaPipe hand detection runs locally
 
-- **Frontend:** React 18 + Vite 5
-- **Gesture Tracking:** MediaPipe Hands (CDN)
-- **API Proxy:** Vercel Serverless Function (`/api/age.js`) & Vite local API Proxy middleware
-- **AI Model:** Hugging Face Space — `Robys01/Face-Aging` (free & public)
-- **Styling:** Vanilla CSS, dark theme, flat aesthetics
+## AI Model
 
----
+**Conditional UNet + PatchGAN** trained on FFHQ (70k faces)
+
+### Architecture
+
+```
+Input: 5-channel tensor [RGB + source_age_map + target_age_map]
+       ↓
+Encoder: 512→256→128→64→32 (BlurPool antialiasing)
+       ↓
+Decode: 32→64→128→256→512 (skip connections)
+       ↓
+Output: 512×512 aged RGB face
+```
+
+### Key Details
+
+- **UNet**: Encoder-decoder with spatial skip connections preserves facial identity
+- **BlurPool**: Antialiasing replaces strided convolutions to prevent artifact compression during age transformation
+- **PatchGAN Discriminator**: Patch-level realism evaluation — more sensitive to local texture (wrinkles, skin tone) than full-image discriminators
+- **Age Encoding**: Continuous spatial channels (not discrete classes) — supports any source→target age, including de-aging
+- **Training Data**: FFHQ 70,000 faces, age labels via face analysis
+
+### Inference
+
+- Face detection & preprocessing: Dlib 68-point landmarks
+- Age transformation: PyTorch UNet forward pass (~500ms)
+- Video generation: 17-frame morphing interpolation → MP4
+
+## Tech Stack
+
+**Frontend**
+- React 18, Vite 5
+- MediaPipe Hands (gesture detection, local browser)
+- Canvas API (face capture)
+
+**Backend**
+- Python inference: PyTorch UNet + PatchGAN
+- Dlib: Face detection, 68-point landmarks
+- FFmpeg: Video encoding
+
+**Deployment**
+- Netlify serverless functions (`/api/age`)
+- Hugging Face Gradio Space (inference backend)
 
 ## Run Locally
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Start the dev server
 npm run dev
+# http://localhost:5173 (Chrome required, camera required)
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in Chrome (camera required).
+## API
 
-> **Note:** The `/api/age` endpoint works out-of-the-box locally using the custom Vite API proxy plugin that connects directly to the Hugging Face Space. No API keys are required as the Space is public and free!
+**POST** `/api/age`
 
----
-
-## Deploy to Vercel
-
-```bash
-# 1. Install Vercel CLI
-npm i -g vercel
-
-# 2. Deploy
-vercel --prod
+```json
+{
+  "type": "image",
+  "imageBase64": "...",
+  "sourceAge": 25,
+  "targetAge": 60
+}
 ```
 
-The `vercel.json` config is already set up — just push and deploy.
+Response:
+```json
+{
+  "output": "https://..."
+}
+```
 
----
+Video generation: set `type: "video"`, include `duration` and `fps`.
 
-## Age Setup Modal
+## Project Structure
 
-Upon page load, users are prompted with a secure, non-glowing age input modal:
-- **Empty Default**: Starts completely empty with the placeholder `"25"`.
-- **Validation**: Accepts numeric values between `0` and `80`. Entering values outside this range displays an inline red error message.
-- **Form Controls**: The Confirm button stays disabled until a valid age is entered.
-
----
-
-## Gesture Controls
-
-The application maps active gestures detected within the **Gesture Zone** (left 30% of the camera frame):
-
-| Gesture | Delay | Action |
-|---------|-------|--------|
-| **FIST (✊)** | 1.5s Hold | Captures photo → initiates AI generation for current target age |
-| **INDEX UP (Index Finger ↑)** | 1.5s Hold | Increases target age |
-| **INDEX DOWN (Index Finger ↓)** | 1.5s Hold | Decreases target age |
-| **PEACE (✌️ / Index + Middle Extended)** | **Immediate** | Aborts all pending API calls and cancels active queue generations |
-
----
-
-## Camera App Countdown
-
-When a capture is triggered:
-- **Corner Timer**: A thin transparent white countdown number (`3` -> `2` -> `1`) displays in the bottom-right corner of the camera feed.
-- **Camera Shutter Flash**: At `0` (snapshot moment), a white overlay flashes (`0` → `0.4` → `0` opacity) over `150ms` across the webcam frame.
-
----
-
-## Right Panel Layout (IMAGES & VIDEO Tabs)
-
-The right panel features a `36px` high toggle tab bar to switch between gallery formats:
-
-### 1. IMAGES Tab (Default Active)
-- **Grid Layout**: Displays a 2-column grid of snapshots.
-- **Card Actions**: Successful cards show download (`↓`) and delete (`✕`) controls only on hover.
-- **Failure States**: Failed cards display a persistent `"✕ Failed"` overlay with a **Retry** button and a top-right circular close button (`✕`) that is always visible.
-- **Status Bar**: A top status bar tracks bulk timeline generation progress (`GENERATING 8 / 17`) and shows `COMPLETE 17 / 17` for 3 seconds before hiding.
-
-### 2. VIDEO Tab
-- **Timelapses**: Displays the generated video timelapses showing aging transitions.
-- **Baby-to-Senior Transition**: Automatically configures the source age to `0` and target age to `80` to render the transition from birth.
-- **Player & Downloads**: Features a built-in player that spans the full panel width, complete with a clean download button (`DOWNLOAD VIDEO`).
-- **Auto-Switching**: Triggering a video generation from the controls panel automatically switches focus to the Video tab upon completion.
-
----
+```
+├── src/
+│   ├── App.jsx                ← Main app, state management
+│   └── components/
+│       ├── WebcamFeed.jsx     ← Camera feed, countdown overlay
+│       ├── GestureEngine.jsx  ← MediaPipe gesture detection
+│       ├── AgeSlider.jsx      ← Age control
+│       └── TimestampStrip.jsx ← Gallery + video tab
+├── netlify/functions/
+│   └── age.js                 ← Serverless proxy to HF Space
+├── backend/
+│   ├── models.py              ← UNet + PatchGAN architecture
+│   ├── app.py                 ← Inference server
+│   └── requirements.txt
+└── netlify.toml               ← Netlify build config
+```
 
 ## License
 

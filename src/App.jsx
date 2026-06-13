@@ -7,6 +7,7 @@ export default function App() {
   const [userAge, setUserAge] = useState(null);
   const [modalAge, setModalAge] = useState('');
   const [targetAge, setTargetAge] = useState(21);
+  const [showWelcome, setShowWelcome] = useState(true);
 
   const [cameraPermissionStatus, setCameraPermissionStatus] = useState('prompt');
   const [leftPanelWidth, setLeftPanelWidth] = useState('60%');
@@ -14,6 +15,7 @@ export default function App() {
 
   const [apiStatus, setApiStatus] = useState('idle');
   const [isWakingUp, setIsWakingUp] = useState(false);
+  const [generatingAge, setGeneratingAge] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [overlayImage, setOverlayImage] = useState(null);
   const [lastSnapshot, setLastSnapshot] = useState(null);
@@ -78,6 +80,7 @@ export default function App() {
     activeControllersRef.current = [];
     setStatusBarState(null);
     setApiStatus('idle');
+    setGeneratingAge(null);
     setIsWakingUp(false);
     setSnapshots((prev) =>
       prev.map((s) =>
@@ -96,6 +99,7 @@ export default function App() {
 
     cancelGeneration();
     setApiStatus('loading');
+    setGeneratingAge(targetAgeRef.current);
     setTimelineVideoUrl(null);
 
     const imageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
@@ -140,6 +144,7 @@ export default function App() {
     } finally {
       activeControllersRef.current = activeControllersRef.current.filter((c) => c !== controller);
       setApiStatus((s) => s === 'loading' ? 'idle' : s);
+      setGeneratingAge(null);
     }
   }, [cancelGeneration]);
 
@@ -262,6 +267,7 @@ export default function App() {
       }
     }
     setApiStatus('idle');
+    setGeneratingAge(null);
     setStatusBarState({ status: 'complete', current: ages.length, total: ages.length });
     setTimeout(() => setStatusBarState(null), 3000);
   };
@@ -316,6 +322,24 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {/* Welcome Screen */}
+      {showWelcome && cameraPermissionStatus === 'granted' && (
+        <div className="welcome-overlay">
+          <div className="welcome-screen">
+            <h1 className="welcome-screen__title">
+              WELCOME TO<br />AGEWARP
+            </h1>
+            <p className="welcome-screen__subtitle">Your AI Powered Time Machine</p>
+            <p className="welcome-screen__description">
+              Travel back to see your past self or travel into the future to see what your future self will look like.
+            </p>
+            <button className="welcome-screen__btn" onClick={() => setShowWelcome(false)}>
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Camera Permission */}
       {cameraPermissionStatus !== 'granted' && (
         <div className="permission-screen-overlay">
@@ -387,7 +411,7 @@ export default function App() {
               <WebcamFeed
                 ref={webcamRef}
                 apiStatus={apiStatus}
-                currentAge={targetAge}
+                generatingAge={generatingAge}
                 isWakingUp={isWakingUp}
                 countdown={countdown}
               />
@@ -404,19 +428,23 @@ export default function App() {
           {/* Gesture hint bar — pure text, no SVGs */}
           <div className="gesture-instruction-bar">
             <div className="gesture-instruction-item">
-              <div className="gesture-instruction-text-1">✊ FIST</div>
+              <div className="gesture-instruction-emoji">✊</div>
+              <div className="gesture-instruction-text-1">FIST</div>
               <div className="gesture-instruction-text-2">hold to capture</div>
             </div>
             <div className="gesture-instruction-item">
-              <div className="gesture-instruction-text-1">☝ INDEX ↑</div>
+              <div className="gesture-instruction-emoji">☝</div>
+              <div className="gesture-instruction-text-1">INDEX ↑</div>
               <div className="gesture-instruction-text-2">age +</div>
             </div>
             <div className="gesture-instruction-item">
-              <div className="gesture-instruction-text-1">👇 INDEX ↓</div>
+              <div className="gesture-instruction-emoji">👇</div>
+              <div className="gesture-instruction-text-1">INDEX ↓</div>
               <div className="gesture-instruction-text-2">age −</div>
             </div>
             <div className="gesture-instruction-item">
-              <div className="gesture-instruction-text-1">✌ PEACE</div>
+              <div className="gesture-instruction-emoji">✌</div>
+              <div className="gesture-instruction-text-1">PEACE</div>
               <div className="gesture-instruction-text-2">cancel</div>
             </div>
           </div>
