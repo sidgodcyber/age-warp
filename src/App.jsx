@@ -166,7 +166,7 @@ export default function App() {
   }, []);
 
   const retryGeneration = useCallback(async (snap) => {
-    if (!snap || userAgeRef.current === null) return;
+    if (!snap || userAgeRef.current === null || !lastSnapshot) return;
     const { id: cardId, age: currentTargetAge } = snap;
     setSnapshots((prev) => prev.map((s) => s.id === cardId ? { ...s, status: 'processing', errorMsg: null } : s));
 
@@ -178,7 +178,7 @@ export default function App() {
       const res = await fetch('/api/age', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'image', imageBase64: snap.lastSnapshot, sourceAge: userAgeRef.current, targetAge: currentTargetAge }),
+        body: JSON.stringify({ type: 'image', imageBase64: lastSnapshot, sourceAge: userAgeRef.current, targetAge: currentTargetAge }),
         signal: controller.signal,
       });
       clearTimeout(wakingTimeout);
@@ -197,7 +197,7 @@ export default function App() {
     } finally {
       activeControllersRef.current = activeControllersRef.current.filter((c) => c !== controller);
     }
-  }, []);
+  }, [lastSnapshot]);
 
   const triggerFistAction = useCallback(() => {
     if (countdown !== null || apiStatus === 'loading') return;
