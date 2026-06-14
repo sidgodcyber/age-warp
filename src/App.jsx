@@ -344,7 +344,6 @@ export default function App() {
       {cameraPermissionStatus !== 'granted' && (
         <div className="permission-screen-overlay">
           <div className="permission-screen">
-            <div className="permission-screen__icon">📷</div>
             <h2 className="permission-screen__title">Camera Access Required</h2>
             <p className="permission-screen__text">
               AgeWarp needs camera access to detect your face and gestures.
