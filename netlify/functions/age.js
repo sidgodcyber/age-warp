@@ -34,89 +34,133 @@ exports.handler = async function(event, context) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: 'Missing imageBase64, sourceAge, or targetAge' })
+        body: JSON.stringify({ error: 'Missing required parameters' })
       };
     }
 
-    console.log('[age] Connecting to HF Gradio Space...');
+    console.log(`[age] Request: ${sourceAge} → ${targetAge}, type: ${type}`);
     
     // Convert base64 to buffer
     const buffer = Buffer.from(imageBase64, 'base64');
     const form = new FormData();
-    form.append('files', buffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
+    form.append('files', buffer, { 
+      filename: 'image.jpg', 
+      contentType: 'image/jpeg' 
+    });
 
-    // Upload image
-    const uploadRes = await fetch(
-      'https://robys01-face-aging.hf.space/gradio_api/upload',
-      {
-        method: 'POST',
-        body: form,
-        headers: form.getHeaders()
-      }
-    );
-    const uploadData = await uploadRes.json();
-    console.log('[age] Upload response:', uploadData);
+    // Upload image with retry
+    let uploadData;
+    let uploadAttempt = 0;
+    const maxUploadRetries = 2;
     
-    if (uploadRes.status !== 200 || !Array.isArray(uploadData) || uploadData.length === 0) {
-      console.error('[age] Upload failed:', uploadData);
-      throw new Error(`Upload failed: ${JSON.stringify(uploadData)}`);
+    while (uploadAttempt < maxUploadRetries) {
+      try {
+        console.log(`[age] Upload attempt ${uploadAttempt + 1}/${maxUploadRetries}`);
+        
+        const uploadRes = await fetch(
+          'https://robys01-face-aging.hf.space/gradio_api/upload',
+          {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders(),
+            timeout: 30000
+          }
+        );
+        
+        uploadData = await uploadRes.json();
+        
+        if (uploadRes.status === 200 && Array.isArray(uploadData) && uploadData.length > 0) {
+          console.log('[age] Upload successful:', uploadData[0]);
+          break;
+        }
+        
+        console.warn(`[age] Upload failed (attempt ${uploadAttempt + 1}):`, uploadData);
+        uploadAttempt++;
+        
+        if (uploadAttempt < maxUploadRetries) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+        }
+      } catch (uploadError) {
+        console.error(`[age] Upload error (attempt ${uploadAttempt + 1}):`, uploadError.message);
+        uploadAttempt++;
+        
+        if (uploadAttempt >= maxUploadRetries) {
+          throw new Error(`Upload failed after ${maxUploadRetries} attempts: ${uploadError.message}`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
+    
+    if (!uploadData || !Array.isArray(uploadData) || uploadData.length === 0) {
+      throw new Error('Upload failed - no file path returned');
+    }
+    
     const filePath = uploadData[0];
 
-    // Call predict endpoint
+    // Call predict endpoint with timeout handling
     let predictRes;
-    if (type === 'video') {
-      console.log(`[age] Generating video: ${sourceAge} → ${targetAge}`);
-      predictRes = await fetch(
-        'https://robys01-face-aging.hf.space/gradio_api/run/predict_1',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            data: [
-              { path: filePath },
-              0,
-              Number(targetAge),
-              Number(duration),
-              Number(fps)
-            ]
-          })
+    const predictUrl = type === 'video' 
+      ? 'https://robys01-face-aging.hf.space/gradio_api/run/predict_1'
+      : 'https://robys01-face-aging.hf.space/gradio_api/run/predict';
+    
+    const predictBody = type === 'video'
+      ? {
+          data: [
+            { path: filePath },
+            0,
+            Number(targetAge),
+            Number(duration),
+            Number(fps)
+          ]
         }
-      );
-    } else {
-      console.log(`[age] Generating image: ${sourceAge} → ${targetAge}`);
-      predictRes = await fetch(
-        'https://robys01-face-aging.hf.space/gradio_api/run/predict',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            data: [
-              { path: filePath },
-              Number(sourceAge),
-              Number(targetAge)
-            ]
-          })
-        }
-      );
+      : {
+          data: [
+            { path: filePath },
+            Number(sourceAge),
+            Number(targetAge)
+          ]
+        };
+    
+    console.log(`[age] Calling predict endpoint...`);
+    
+    try {
+      predictRes = await fetch(predictUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(predictBody),
+        timeout: 90000 // 90 seconds for AI processing
+      });
+    } catch (fetchError) {
+      console.error('[age] Predict fetch error:', fetchError.message);
+      throw new Error(`Prediction request failed: ${fetchError.message}`);
     }
 
     if (!predictRes.ok) {
-      throw new Error(`Predict request failed with status ${predictRes.status}`);
+      const errorText = await predictRes.text();
+      console.error('[age] Predict HTTP error:', predictRes.status, errorText);
+      throw new Error(`Prediction failed with status ${predictRes.status}`);
     }
 
-    const predictData = await predictRes.json();
-    console.log('[age] Predict response status:', predictRes.status);
+    let predictData;
+    try {
+      predictData = await predictRes.json();
+    } catch (jsonError) {
+      console.error('[age] Failed to parse prediction response:', jsonError.message);
+      throw new Error('Invalid response from AI service');
+    }
 
     if (predictData.error) {
       console.error('[age] Prediction error:', predictData.error);
-      throw new Error(predictData.error);
+      throw new Error(`AI error: ${predictData.error}`);
     }
+    
     if (!predictData.data || predictData.data.length === 0) {
-      console.error('[age] No data in response');
-      throw new Error('No data returned from prediction');
+      console.error('[age] No data in prediction response');
+      throw new Error('No output generated by AI');
     }
 
+    // Extract output URL
     let outputUrl;
     if (type === 'video') {
       const videoData = predictData.data[0];
@@ -127,11 +171,15 @@ exports.handler = async function(event, context) {
     } else {
       const imageData = predictData.data[0];
       outputUrl = imageData.url || 
-                  'https://robys01-face-aging.hf.space/gradio_api/file=' + 
-                  imageData.path;
+                  (imageData.path ? 'https://robys01-face-aging.hf.space/gradio_api/file=' + imageData.path : null);
     }
 
-    console.log('[age] Success:', type, '→', outputUrl);
+    if (!outputUrl) {
+      console.error('[age] No output URL in response:', predictData);
+      throw new Error('No output URL generated');
+    }
+
+    console.log('[age] Success:', outputUrl.substring(0, 80) + '...');
 
     return {
       statusCode: 200,
@@ -140,11 +188,14 @@ exports.handler = async function(event, context) {
     };
 
   } catch (error) {
-    console.error('[age] Failed:', error.message);
+    console.error('[age] Request failed:', error.message);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: error.message || 'Internal error' })
+      body: JSON.stringify({ 
+        error: error.message || 'Processing failed',
+        details: 'The AI service may be overloaded or sleeping. Please try again in a moment.'
+      })
     };
   }
 };
